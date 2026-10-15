@@ -8,16 +8,16 @@
 
 | Regra | Tema | Quem verifica (função Python / agente / humano) | Por quê | Onde foi implementada (preencha na Etapa 11) |
 |---|---|---|---|---|
-| N1 | férias | | | |
-| N2 | férias | | | |
-| N3 | férias | | | |
-| N4 | prazos | | | |
-| N5 | escala | | | |
-| N6 | abono | | | |
-| N7 | diária | | | |
-| N8 | aprovação | | | |
-| N9 | saúde | | | |
-| N10 | dados | | | |
+| N1 | férias | Função Python | Conta de saldo, nº de períodos (até 3) e mínimo de 5 dias: regra objetiva, sem interpretação. | |
+| N2 | férias | Função Python (limite e soma); agente Financeiro (valor) | Limite de 10 dias e dias gozados + vendidos ≤ saldo são aritmética. O valor (salário/30) o Financeiro calcula com as tools. | |
+| N3 | férias | Função Python | Depende só de calendário e feriados (`inicio_permitido`). | |
+| N4 | prazos | Função Python | Antecedência é contagem de dias corridos e úteis a partir da data do pedido. | |
+| N5 | escala | Função Python (decide); agente Escala (explica e sugere outro período) | O limite de 30% (mín. 1) é conta; sugerir novas datas exige raciocínio. | |
+| N6 | abono | Função Python | 1 dia útil, `abonos_restantes`, fim de semana e feriado: tudo objetivo. | |
+| N7 | diária | Agente Financeiro | Combina tabela de diárias, pernoite/meia diária e câmbio do dia, interpretando o período do pedido. | |
+| N8 | aprovação | Função Python (se precisa de chefia); humano (aprovar) | Exigir chefia é regra por tipo de pedido; aprovar é decisão da chefia imediata, e ninguém aprova o próprio pedido. | |
+| N9 | saúde | Função Python (regex CPF/CID) + agente classificador | Dado sensível é padrão fixo (regex, sem LLM); reconhecer um pedido de licença médica exige interpretar o texto. | |
+| N10 | dados | Função Python | Despacho sem CPF/CID é filtro objetivo (guardrail de saída); o Redator só escreve com os fatos recebidos. | |
 
 ## Etapa 11: os 12 casos
 
