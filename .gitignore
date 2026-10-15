@@ -1,0 +1,38 @@
+# Arquivos gerados ao rodar o exercício
+saidas/*
+!saidas/.gitkeep
+
+# Ambientes virtuais
+.venv/
+venv/
+env/
+
+# Segredos e variáveis de ambiente (não enviar para o GitHub)
+.env
+.env.*
+!.env.example
+
+# Cache e arquivos de compilação Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs e bancos de dados locais
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# Configurações de IDEs e editores
+.vscode/
+.idea/
+
+# Arquivos do sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
