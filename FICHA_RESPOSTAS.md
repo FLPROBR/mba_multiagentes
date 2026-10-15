@@ -22,3 +22,20 @@ Abono pecuniário é a conversão de parte das férias em dinheiro. Em geral, o 
   **1 vez.** Só a primeira pergunta cita uma matrícula e depende do cadastro; a segunda é conceitual e o agente respondeu direto.
 - O que mudei até o agente usar a tool só quando precisava?
   Nada precisou ser ajustado após a primeira versão: a docstring diz "somente quando a pergunta for sobre uma matrícula específica; não use para perguntas gerais", e as instruções do agente repetem isso e proíbem inventar saldo.
+
+## Etapa 2
+Saída de `python etapa02_extracao.py` (C1, C2, C5 e C11):
+```
+C1_abono_simples
+  {'tipo': <TipoPedido.ABONO: 'abono'>, 'matricula': '1001', 'data_inicio': '2027-04-09', 'data_fim': '2027-04-09', 'dias_vendidos': 0, 'destino': None, 'tipo_destino': None, 'justificativa': 'Solicita um dia de abono.'}
+
+C2_ferias_com_venda
+  {'tipo': <TipoPedido.FERIAS: 'ferias'>, 'matricula': '1002', 'data_inicio': '2027-04-12', 'data_fim': '2027-04-26', 'dias_vendidos': 10, 'destino': None, 'tipo_destino': None, 'justificativa': 'Solicita férias e a venda de 10 dias.'}
+
+C5_sem_matricula
+  {'tipo': <TipoPedido.FERIAS: 'ferias'>, 'matricula': None, 'data_inicio': None, 'data_fim': None, 'dias_vendidos': 0, 'destino': None, 'tipo_destino': None, 'justificativa': 'Solicita férias em agosto de 2027.'}
+
+C11_diaria_exterior
+  {'tipo': <TipoPedido.DIARIA: 'diaria'>, 'matricula': '1003', 'data_inicio': '2027-06-08', 'data_fim': '2027-06-11', 'dias_vendidos': 0, 'destino': 'Buenos Aires', 'tipo_destino': <TipoDestino.EXTERIOR: 'exterior'>, 'justificativa': 'Participação em um congresso.'}
+```
+- O C5 veio com datas inventadas? **Não.** Já escrevi nas `description` de `data_inicio`/`data_fim` que só se preenche com o dia exato ("em agosto", "perto da Páscoa" -> null), e nas instruções "não invente o que não foi dito". Por isso não foi preciso corrigir depois.

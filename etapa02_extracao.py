@@ -57,40 +57,48 @@ class TipoDestino(str, Enum):
 
 
 class Pedido(BaseModel):
-    # ETAPA 2.1 -- complete os campos. O primeiro já está pronto como modelo.
-    #   matricula: str | None          (4 dígitos; None se o servidor não informou)
-    #   data_inicio: str | None        (AAAA-MM-DD)
-    #   data_fim: str | None           (AAAA-MM-DD; no abono, igual à data_inicio)
-    #   dias_vendidos: int             (0 a 10; abono pecuniário, regra N2 -- use Field(default=0, ge=0, le=10, ...))
-    #   destino: str | None            (só para diária: a cidade)
-    #   tipo_destino: TipoDestino | None
-    #   justificativa: str             (resumo do motivo, sem dados de saúde)
-    #   Escreva a DESCRIPTION de cada um: é a "instrução" que o LLM lê para preencher o campo.
-    #   Referência: aula2/agente_output2.py (Ocorrencia, Envolvido, PapelEnvolvido)
     tipo: TipoPedido = Field(description=(
         "Tipo do pedido: 'ferias' (descanso anual, pode incluir venda de dias), 'abono' (folga de 1 dia útil), "
         "'diaria' (viagem a serviço), 'licenca_saude' (afastamento por doença) ou 'outro'."))
+    matricula: str | None = Field(default=None, description=(
+        "Matrícula do servidor: 4 dígitos, como informada no texto (ex.: '1002'). "
+        "null se o servidor não informou a matrícula; nunca invente."))
+    data_inicio: str | None = Field(default=None, description=(
+        "Primeiro dia do período, no formato AAAA-MM-DD. Só preencha se o servidor disse o dia exato "
+        "(ex.: '12/04/2027' -> '2027-04-12'). Se disse só o mês, a estação ou uma expressão vaga "
+        "('em agosto', 'perto da Páscoa', 'semana que vem'), use null. Nunca invente datas."))
+    data_fim: str | None = Field(default=None, description=(
+        "Último dia do período, no formato AAAA-MM-DD. No abono (1 dia), é igual à data_inicio. "
+        "null se o servidor não disse o dia exato; nunca invente datas."))
+    dias_vendidos: int = Field(default=0, ge=0, le=10, description=(
+        "Quantidade de dias de férias que o servidor quer VENDER (abono pecuniário, regra N2), de 0 a 10. "
+        "Use 0 se ele não pediu explicitamente para vender dias. Não confunda com os dias de descanso."))
+    destino: str | None = Field(default=None, description=(
+        "Cidade de destino da viagem. Só para diária; null nos demais pedidos."))
+    tipo_destino: TipoDestino | None = Field(default=None, description=(
+        "Classificação do destino, só para diária: 'capital' (capital brasileira), 'interior' (cidade do interior "
+        "do Brasil) ou 'exterior' (fora do Brasil). null se não for diária."))
+    justificativa: str = Field(default="", description=(
+        "Resumo curto do motivo do pedido, em uma frase. Não inclua CPF, CID nem informação de saúde."))
 
 
 def criar_extrator(instrucoes: str, input_guardrails: list | None = None) -> Agent:
-    # ETAPA 2.2 -- devolva Agent(name="Extrator", instructions=instrucoes, output_type=Pedido,
-    #   input_guardrails=input_guardrails or [])
-    #   (os guardrails só entram na Etapa 3; até lá, a lista fica vazia)
-    raise NotImplementedError("ETAPA 2.2: criar_extrator")
+    return Agent(name="Extrator", instructions=instrucoes, output_type=Pedido,
+                 input_guardrails=input_guardrails or [])
 
 
 INSTRUCOES_EXTRATOR = (
     f"Hoje é {texto_hoje()}. "  # (PRONTO) a data real: o modelo não tem relógio (aula3/agente_retry.py)
     "Você extrai pedidos de servidores para o RH (férias, abono ou diária). "
-    "TODO ETAPA 2.2: complete -- datas no formato AAAA-MM-DD, não invente o que não foi dito (use null), "
-    "dias vendidos só se o servidor pedir explicitamente."
+    "Datas sempre no formato AAAA-MM-DD. Não invente o que não foi dito: se o servidor não informou a matrícula, "
+    "ou deu só o mês ou uma data vaga, use null. Dias vendidos só se o servidor pedir explicitamente para vender "
+    "(caso contrário, 0). No abono, a data final é igual à inicial. Em diárias, classifique o destino como "
+    "capital, interior ou exterior."
 )
 
 
 def extrair(texto: str) -> Pedido:
-    # ETAPA 2.3 -- rode criar_extrator(INSTRUCOES_EXTRATOR) com Runner.run_sync e devolva final_output
-    #   (é um objeto Pedido, não texto!)
-    raise NotImplementedError("ETAPA 2.3: extrair")
+    return Runner.run_sync(criar_extrator(INSTRUCOES_EXTRATOR), texto).final_output
 
 
 # ------------------------------------------------------------------ 🆕 A: votação (OPCIONAL, bônus)
