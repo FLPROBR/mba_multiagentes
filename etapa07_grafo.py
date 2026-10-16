@@ -316,6 +316,9 @@ def rotear_chefia(estado: Estado) -> str:
 # ------------------------------------------------------------------ ETAPA 7.5 / 9.4: registrar
 def registrar(estado: Estado) -> dict:
     pedido = estado["pedido"]
+    # ETAPA 9.4 -- guardrail de SAÍDA: o despacho não pode ter CPF nem CID (N10). Se tiver, não grava.
+    if encontrar_dado_sensivel(estado["despacho"]):
+        return {"resultado": "bloqueado_na_saida", "caminho": ["registrar"]}
     protocolo = gerar_protocolo(pedido["matricula"], pedido["tipo"], pedido["data_inicio"], pedido["data_fim"])
     decisao, despacho = estado["decisao"], estado["despacho"]
     if estado.get("rejeicoes", 0) >= MAX_REJEICOES:

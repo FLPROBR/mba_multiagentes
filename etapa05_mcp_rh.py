@@ -23,6 +23,7 @@ Testar sem agente (MCP Inspector, precisa de Node.js):
 
 Pronto quando: o Inspector lista as 6 tools; registrar C1 duas vezes gera um único registro.
 """
+import hmac
 import json
 import os
 from datetime import datetime
@@ -122,12 +123,25 @@ def consultar_remuneracao(matricula: str) -> dict:
 
 # ------------------------------------------------------------------ ETAPA 5.2 / 9.2 / 9.3: escrita
 def _auditar(protocolo: str, decisao_acesso: str, motivo: str, parametros: dict) -> None:
-    # ETAPA 9.3 -- acrescente UMA linha JSON em ARQUIVO_AUDITORIA com: quando (datetime.now().isoformat()),
-    #   thread_id, quem pediu (aprovador), tool ("registrar_decisao"), protocolo, decisao_acesso ("ALLOW"/"DENY"),
-    #   motivo e os parâmetros (SEM o token e SEM o despacho inteiro).
-    #   Referência: aula5/exemplos/10_seguranca/server_seguro.py (_registrar_auditoria), aqui em JSON Lines.
-    #   Até fazer a 9.3, este pass deixa a escrita funcionar sem auditoria.
-    pass
+    """ETAPA 9.3 -- uma linha JSON por tentativa de escrita (ALLOW ou DENY). Sem o token e sem o despacho inteiro."""
+    linha = {
+        "quando": datetime.now().isoformat(timespec="seconds"),
+        "thread_id": parametros.get("thread_id", ""),
+        "quem": parametros.get("aprovador", ""),
+        "tool": "registrar_decisao",
+        "protocolo": protocolo,
+        "decisao_acesso": decisao_acesso,
+        "motivo": motivo,
+        "parametros": {k: v for k, v in parametros.items() if k not in ("token", "despacho")},
+    }
+    with ARQUIVO_AUDITORIA.open("a", encoding="utf-8") as arquivo:
+        arquivo.write(json.dumps(linha, ensure_ascii=False) + "\n")
+
+
+def _negar(protocolo: str, motivo: str, parametros: dict) -> dict:
+    """Audita o DENY e devolve o erro: quem nega é o SERVER, não o agente."""
+    _auditar(protocolo, "DENY", motivo, parametros)
+    return {"sucesso": False, "erro": motivo}
 
 
 @mcp.tool()
@@ -158,6 +172,16 @@ def registrar_decisao(protocolo: str, matricula: str, tipo: str, inicio: str, fi
     #   - decisao == "deferido" e tipo in TIPOS_COM_CHEFIA e aprovador != chefia do servidor no cadastro.
     #   Devolva {"sucesso": False, "erro": "..."} -- quem nega é o SERVER, não o agente.
     #   Referência: aula5/exemplos/10_seguranca/server_seguro.py (alterar_status_ocorrencia)
+    if not TOKEN_REGISTRO or not hmac.compare_digest(token.encode(), TOKEN_REGISTRO.encode()):
+        return _negar(protocolo, "token inválido", parametros)
+    if decisao not in DECISOES_VALIDAS:
+        return _negar(protocolo, f"decisão inválida: {decisao!r} (use {sorted(DECISOES_VALIDAS)})", parametros)
+    if aprovador == matricula:
+        return _negar(protocolo, "ninguém aprova o próprio pedido (N8)", parametros)
+    if decisao == "deferido" and tipo in TIPOS_COM_CHEFIA:
+        chefia = carregar_servidores().get(matricula, {}).get("chefia")
+        if aprovador != chefia:
+            return _negar(protocolo, f"aprovador {aprovador!r} não é a chefia imediata do servidor (N8)", parametros)
 
     # ETAPA 5.2 -- grave em ARQUIVO_REGISTROS (use _ler_registros/_gravar_registros).
     #   Protocolo já existe -> NÃO grave de novo; devolva {"sucesso": True, "duplicado": True, ...}.

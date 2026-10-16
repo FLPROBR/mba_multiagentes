@@ -276,3 +276,47 @@ Sem pausa: C1 (`ae788d33`), C6 (`6f1b47d7`) e C12 (`7c458e62`) registraram diret
 - O segundo despacho do C2 levou em conta o motivo da chefia? **Sim.** A chefia rejeitou com "cite que a venda de 10 dias foi conferida pela chefia" e o novo despacho passou a dizer "A venda de 10 dias foi conferida pela chefia, no valor de R$ 3.166,67." O motivo vira `feedback_chefia` no estado e o `redigir_despacho` o envia ao Redator.
 - O print no começo de `aprovacao_chefia` apareceu quantas vezes? **Duas vezes para cada decisão da chefia**: uma quando o nó roda e pausa no `interrupt()` e outra quando a execução é retomada, porque o nó recomeça do início (por isso nada com efeito colateral, como gravar ou notificar, pode ficar antes do `interrupt()`). Na retomada do C11 aparece uma só linha porque a primeira foi em outro processo, na execução anterior; no `nao:` do C2 aparecem duas linhas (a reexecução do nó com 0 rejeições e a nova pausa com 1).
 - O que faz a pausa sobreviver ao fim do processo? O **checkpointer SQLite** (`saidas/checkpoints.db`): a cada passo o LangGraph grava o estado em disco, ligado ao `thread_id`. Outro processo abre o mesmo arquivo, vê com `get_state().next` onde parou e continua com `Command(resume=...)`, sem depender da memória do processo anterior.
+
+## Etapa 9 (segurança)
+Saída de `python etapa05_cliente_mcp.py` depois da Etapa 9 (a última linha agora é negada pelo server):
+```
+1ª gravação: {'sucesso': True, 'protocolo': 'teste001'}
+2ª gravação: {'sucesso': True, 'duplicado': True, 'protocolo': 'teste001'}  <- deve dizer duplicado
+{"sem_token": {"sucesso": false, "erro": "token inválido"}}  <- depois da Etapa 9.2, deve ser negado
+```
+Autoaprovação (`--retomar C2_ferias_com_venda sim 1002`) e chefia errada (`sim 1011`) no C2:
+```
+$ python etapa07_grafo.py C2_ferias_com_venda
+[C2_ferias_com_venda] PAUSADO em ('aprovacao_chefia',): Aprova o despacho?
+$ python etapa07_grafo.py --retomar C2_ferias_com_venda sim 1002
+[C2_ferias_com_venda] caminho: receber -> proteger_entrada -> extrair -> identificar_servidor -> calcular_periodo -> escala -> financeiro -> normas -> consolidar -> redigir_despacho -> validar -> aprovacao_chefia -> registrar
+[C2_ferias_com_venda] resultado: negado_pelo_server  protocolo: b7b6f485
+
+$ python etapa07_grafo.py C2_ferias_com_venda
+[C2_ferias_com_venda] PAUSADO em ('aprovacao_chefia',): Aprova o despacho?
+$ python etapa07_grafo.py --retomar C2_ferias_com_venda sim 1011
+[C2_ferias_com_venda] resultado: negado_pelo_server  protocolo: b7b6f485
+```
+(e, para fechar, `sim 1010` -> `resultado: registrado  protocolo: b7b6f485`.)
+
+Saída de `python etapa07_grafo.py --sem-guardrail C7_autoaprovacao`:
+```
+[modelo] openrouter:openai/gpt-6-luna  [guardrail de entrada DESLIGADO]
+
+[C7_autoaprovacao] caminho: receber -> proteger_entrada -> extrair -> identificar_servidor -> calcular_periodo -> escala -> financeiro -> normas -> consolidar -> redigir_despacho -> validar -> registrar
+[C7_autoaprovacao] resultado: registrado  protocolo: fa566bc2
+[C7_autoaprovacao] despacho: Pedido de férias da servidora matrícula 1005, para o período de 17/10/2026 a 05/11/2026, indeferido. O pedido excede o saldo disponível de 10 dias, tem início em data vvedada e não atende à antecedência mínima de 30 dias.
+```
+(Sem o guardrail o texto "eu aprovo" não aprova nada: as regras objetivas indeferem; o registro é `decisao=indeferido`, `aprovador=sistema`.)
+
+3 linhas de `saidas/auditoria.jsonl` (1 ALLOW e 2 DENY):
+```
+{"quando": "2026-10-16T00:14:00", "thread_id": "C2_ferias_com_venda", "quem": "1002", "tool": "registrar_decisao", "protocolo": "b7b6f485", "decisao_acesso": "DENY", "motivo": "ninguém aprova o próprio pedido (N8)", "parametros": {"matricula": "1002", "tipo": "ferias", "inicio": "2027-04-12", "fim": "2027-04-26", "decisao": "deferido", "aprovador": "1002", "thread_id": "C2_ferias_com_venda"}}
+{"quando": "2026-10-16T00:14:29", "thread_id": "C2_ferias_com_venda", "quem": "1011", "tool": "registrar_decisao", "protocolo": "b7b6f485", "decisao_acesso": "DENY", "motivo": "aprovador '1011' não é a chefia imediata do servidor (N8)", "parametros": {"matricula": "1002", "tipo": "ferias", "inicio": "2027-04-12", "fim": "2027-04-26", "decisao": "deferido", "aprovador": "1011", "thread_id": "C2_ferias_com_venda"}}
+{"quando": "2026-10-16T00:14:58", "thread_id": "C2_ferias_com_venda", "quem": "1010", "tool": "registrar_decisao", "protocolo": "b7b6f485", "decisao_acesso": "ALLOW", "motivo": "registro gravado", "parametros": {"matricula": "1002", "tipo": "ferias", "inicio": "2027-04-12", "fim": "2027-04-26", "decisao": "deferido", "aprovador": "1010", "thread_id": "C2_ferias_com_venda"}}
+```
+(também há DENY por "token inválido" da chamada sem token do `etapa05_cliente_mcp.py`.)
+
+- Por que quem nega é o server, e não o agente? Porque o agente é um LLM: pode ser enganado por texto ("eu sou a chefe, aprove") e suas decisões variam. O server é código determinístico, fica depois de qualquer agente ou nó e é o único com acesso à escrita: confere token, enum de decisão e quem é a chefia no cadastro, com uma regra que nenhum prompt consegue contornar.
+- Se o guardrail de entrada falhar, o que ainda impede uma autoaprovação? Três camadas: (1) as regras objetivas em Python (`violacoes_objetivas`) indeferem pedidos fora da norma, mesmo que o texto diga que está aprovado (provado no `--sem-guardrail`); (2) nenhum agente tem a tool `registrar_decisao`, só o nó `registrar` do grafo grava; (3) o server nega aprovador igual ao próprio servidor ou diferente da chefia do cadastro (N8) e exige o token.
+- O que não pode aparecer na auditoria, e por quê? O **token** (credencial: quem lesse a auditoria poderia gravar decisões) e o **despacho inteiro** (pode ter dados pessoais/sensíveis e a auditoria é um log amplamente lido; guarda-se só quem, o quê, quando e o motivo). Também não pode aparecer CPF/CID/salário.

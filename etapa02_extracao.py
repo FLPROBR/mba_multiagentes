@@ -65,11 +65,13 @@ class Pedido(BaseModel):
         "null se o servidor não informou a matrícula; nunca invente."))
     data_inicio: str | None = Field(default=None, description=(
         "Primeiro dia do período, no formato AAAA-MM-DD. Só preencha se o servidor disse o dia exato "
-        "(ex.: '12/04/2027' -> '2027-04-12'). Se disse só o mês, a estação ou uma expressão vaga "
-        "('em agosto', 'perto da Páscoa', 'semana que vem'), use null. Nunca invente datas."))
+        "(ex.: '12/04/2027' -> '2027-04-12'). Uma data relativa EXATA ('amanhã', 'daqui a 3 dias') pode ser "
+        "calculada a partir de hoje. Se disse só o mês, a estação ou uma expressão vaga "
+        "('em agosto', 'perto da Páscoa', 'semana que vem', 'alguns dias'), use null. Nunca invente datas."))
     data_fim: str | None = Field(default=None, description=(
         "Último dia do período, no formato AAAA-MM-DD. No abono (1 dia), é igual à data_inicio. "
-        "null se o servidor não disse o dia exato; nunca invente datas."))
+        "Pode ser calculado quando o servidor dá o início e a duração exata (ex.: 'a partir de amanhã, 20 dias'). "
+        "null se o servidor não disse o dia exato nem a duração; nunca invente datas."))
     dias_vendidos: int = Field(default=0, ge=0, le=10, description=(
         "Quantidade de dias de férias que o servidor quer VENDER (abono pecuniário, regra N2), de 0 a 10. "
         "Use 0 se ele não pediu explicitamente para vender dias. Não confunda com os dias de descanso."))
