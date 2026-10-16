@@ -124,7 +124,7 @@ graph TD;
 
 ## Reflexão (até 3 linhas cada)
 
-**Tempo gasto:** cerca de 7 a 8 horas (15/10 à noite a 16/10 de manhã). **Etapa mais difícil:** a Etapa 0 (ambiente: Python 3.14 incompatível, troca para OpenRouter, Node para o Inspector) e a Etapa 9 (ajustar a extração para o C7 sem guardrail chegar às regras e testar as negações do server).
+**Tempo gasto:** cerca de 12 a 13 horas, contando a análise e a conferência (15/10 à noite a 16/10). **Etapa mais difícil:** a Etapa 0 (ambiente: Python 3.14 incompatível, troca para OpenRouter, Node para o Inspector) e a Etapa 9 (ajustar a extração para o C7 sem guardrail chegar às regras e testar as negações do server).
 
 
 1. Quem decide o caminho no seu sistema: o LLM, o grafo, as regras ou um humano? Dê um exemplo de cada.
