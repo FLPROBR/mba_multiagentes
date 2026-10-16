@@ -206,3 +206,21 @@ Saída de `python etapa06_linear.py` (os 9 passos e o JSON final de cada caso):
 - Quais especialistas o Coordenador consultou no C1? Por que não todos? **Normas e Escala** (`parecer_normas`, `parecer_escala`). Um abono simples não envolve dinheiro, então o Financeiro não é necessário; o Coordenador escolhe só os que precisa (menos chamadas de LLM, menos custo e tempo). Pelo mesmo motivo, no C11 (diária) ele pulou a Escala e consultou Normas e Financeiro.
 - Diferença entre usar um especialista como tool (`as_tool`) e fazer um handoff: com `as_tool`, o Coordenador **continua no controle**: chama o especialista como uma função, recebe a resposta, junta os pareceres e é ele quem responde ao final. No handoff, o controle é **transferido**: o outro agente assume a conversa e responde diretamente. Aqui precisamos de um parecer único consolidado, por isso `as_tool`.
 - Qual agente escreveu cada parte: Normas (regras cumpridas/violadas), Escala (conflito N5 e sugestão de datas), Financeiro (a conta da venda/diária), Coordenador (parecer único) e Redator (o despacho). A decisão deferido/indeferido veio do Python (`violacoes_objetivas`), não de agente.
+
+## Etapa 7 (o grafo)
+Saída de `python etapa07_grafo.py C1_abono_simples` e `C6_conflito_de_escala`:
+```
+[C1_abono_simples] caminho: receber -> proteger_entrada -> extrair -> identificar_servidor -> calcular_periodo -> escala -> financeiro -> normas -> consolidar -> redigir_despacho -> validar -> registrar
+[C1_abono_simples] resultado: registrado  protocolo: ae788d33
+[C1_abono_simples] despacho: Pedido de abono da servidora de matrícula 1001, referente ao período de 09/04/2027 a 09/04/2027, deferido.
+
+[C6_conflito_de_escala] caminho: receber -> proteger_entrada -> extrair -> identificar_servidor -> calcular_periodo -> escala -> financeiro -> normas -> consolidar -> redigir_despacho -> validar -> registrar
+[C6_conflito_de_escala] resultado: registrado  protocolo: 6f1b47d7
+[C6_conflito_de_escala] despacho: Pedido de férias da matrícula 1004, para o período de 12/07/2027 a 26/07/2027, **indeferido**, em razão do limite de afastamentos da equipe já estar ocupado no período coincidente de 12/07/2027 a 19/07/2027.
+Sugere-se novo período de 20/07/2027 a 03/08/2027, correspondente a 15 dias corridos.
+```
+Outros casos do grafo (ainda sem a chefia, que entra na Etapa 8): C2 `b7b6f485`, C11 `ec67dba1`, C12 `7c458e62` (indeferido por N3); C5 termina em `pedir_dados`.
+
+- Em que ordem os ramos normas, escala e financeiro apareceram? Por que a ordem pode variar? Apareceram como `escala -> financeiro -> normas` (a ordem em que os ramos terminam/são registrados). Os três rodam no **mesmo passo** (fan-out) em paralelo e cada um leva um tempo diferente (chamadas de LLM variam), então a ordem entre eles não é fixa; o que é garantido é que os três vêm antes de `consolidar`, que aparece uma única vez (fan-in com lista espera os três).
+- O que aconteceu quando tirei o reducer de `violacoes` (experimento 7.1)? Fiz um experimento isolado com dois ramos paralelos escrevendo em `violacoes`. **Sem reducer:** `InvalidUpdateError: At key 'violacoes': Can receive only one value per step. Use an Annotated key to handle multiple values.` **Com `Annotated[list[str], operator.add]`:** as listas se somam: `['N5: da escala', 'N3: da normas']`. O reducer diz ao LangGraph como combinar escritas simultâneas no mesmo campo.
+- O ciclo `redigir_despacho -> validar` repetiu alguma vez? **Não**, em nenhum dos casos rodados (todos passaram na 1ª validação; `erro_validacao` vazio). Isso porque ajustei as instruções do Redator para citar matrícula, início do período e a palavra "deferido/indeferido". Testei o mecanismo à parte: com o despacho "Defiro o abono." o `validar` devolve `erro_validacao = "cite a matrícula 1001; cite o início do período (2027-04-09); diga a decisão (deferido ou indeferido)"`, o roteador manda voltar a `redigir` nas tentativas 1 e 2 e segue para frente na 3ª (limite `MAX_TENTATIVAS = 3`).

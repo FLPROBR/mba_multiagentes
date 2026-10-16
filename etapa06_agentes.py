@@ -119,7 +119,8 @@ def criar_redator() -> Agent:
             "Você redige o DESPACHO oficial (deferimento ou indeferimento) de um pedido de servidor, em português formal "
             "e objetivo, em um ou dois parágrafos. Use SOMENTE os fatos recebidos: matrícula, período, decisão, regras "
             "citadas, valores e, no indeferimento, a sugestão de novas datas. O despacho DEVE citar a matrícula, o "
-            "período (datas) e a decisão (defiro ou indefiro). Não invente fatos nem valores. "
+            "período (datas) e a decisão, usando a palavra 'deferido' ou 'indeferido' (ex.: 'Pedido deferido'). "
+            "Não invente fatos nem valores. "
             "NUNCA escreva CPF, CID ou qualquer informação de saúde (regra N10). "
             "Se receber um feedback (da validação ou da chefia), corrija o despacho conforme o feedback."
         ),
