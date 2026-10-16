@@ -114,3 +114,95 @@ Sim. Há um servidor de férias de 5 a 19 de julho de 2027, período que se sobr
 - Quantas tools o MCP Inspector listou? **6**: consultar_servidor, consultar_escala, consultar_normas, tabela_diarias, consultar_remuneracao e registrar_decisao (conferido com o Inspector em modo linha de comando, `--cli --method tools/list`).
 - Por que toda tool do server devolve um dict, e não uma lista? Uma tool MCP que devolve lista manda cada item como um conteúdo separado; quem chama não distingue "lista com 1 item" de "1 dict" e o cliente (`chamar_mcp`) lê só o primeiro conteúdo como JSON. Com sempre um dict o formato é previsível (por isso `consultar_normas` devolve `{"tema":..., "regras":[...]}`).
 - O que acontece quando grava o mesmo protocolo duas vezes? A 2ª chamada não grava de novo: o server vê que o protocolo já existe em `registros.json` e devolve `{"sucesso": True, "duplicado": True, "protocolo": ...}`. Fica um único registro (idempotência).
+
+## Etapa 6 (Marco mínimo)
+Saída de `python etapa06_regras.py`:
+```
+C1: nenhuma violação  chefia=False  OK
+C2: nenhuma violação  chefia=True  OK
+C6: ['N5: a equipe já tem 1 afastado(s) no período: 1006 (2027-07-05 a 2027-07-19)']  chefia=False  OK
+C12: ['N3: as férias não podem começar em 2027-04-30 (véspera de feriado/fim de semana)']  chefia=False  OK
+```
+Saída de `python etapa06_linear.py` (os 9 passos e o JSON final de cada caso):
+```
+=============== C1_abono_simples
+[1/9] guardrails
+[2/9] extração: abono 1001 2027-04-09..2027-04-09
+[3/9] servidor: Ana Ribeiro (Plantão A)
+[4/9] período: 1 dia(s) útil(eis), retorno 2027-04-12 (fonte: brasilapi)
+[5/9] violações: nenhuma
+[6/9] coordenador: consultou parecer_normas, parecer_escala
+[7/9] redator
+[8/9] protocolo ae788d33
+[9/9] registrar: {'sucesso': True, 'protocolo': 'ae788d33'}
+{
+  "resultado": "registrado",
+  "protocolo": "ae788d33",
+  "despacho": "Defiro o pedido de abono do servidor de matrícula 1001, referente ao período de 09/04/2027 a 09/04/2027.",
+  "parecer": "**Parecer:** O pedido de abono de 1 dia útil (09/04/2027) atende às regras verificadas; não há feriado no período. Não foi possível verificar o limite de dias restantes, pois essa informação não foi fornecida. A consulta não identificou conflito de escala para a equipe Plantão A, portanto não é necessário sugerir outro período. A decisão de aprovação cabe à chefia."
+}
+
+=============== C2_ferias_com_venda
+[1/9] guardrails
+[2/9] extração: ferias 1002 2027-04-12..2027-04-26
+[3/9] servidor: Bruno Castro (Plantão A)
+[4/9] período: 10 dia(s) útil(eis), retorno 2027-04-27 (fonte: brasilapi)
+[5/9] violações: nenhuma
+[tool] consultar_remuneracao(1002) EXECUTOU
+[6/9] coordenador: consultou parecer_normas, parecer_escala, parecer_financeiro
+[7/9] redator
+[8/9] protocolo b7b6f485
+[9/9] registrar: {'sucesso': True, 'protocolo': 'b7b6f485'}
+{
+  "resultado": "registrado",
+  "protocolo": "b7b6f485",
+  "despacho": "Defiro o pedido de férias da matrícula 1002, referente ao período de 12/04/2027 a 26/04/2027. Não foram apontadas violações objetivas nem conflito de escala para o Plantão A no período. O valor correspondente à venda de 10 dias é de R$ 3.166,67.",
+  "parecer": "**Parecer:** Não foram apontadas violações objetivas. As regras avaliáveis foram cumpridas, mas não é possível verificar o prazo mínimo de antecedência sem a data do pedido. A aprovação cabe à chefia.\n\nNão há conflito de escala para o Plantão A no período de **12 a 26/04/2027**; não é necessário sugerir outras datas.\n\n**Venda de 10 dias:** 10 × R$ 9.500,00 ÷ 30 = **R$ 3.166,67**."
+}
+
+=============== C6_conflito_de_escala
+[1/9] guardrails
+[2/9] extração: ferias 1004 2027-07-12..2027-07-26
+[3/9] servidor: Diego Matos (Cartório)
+[4/9] período: 11 dia(s) útil(eis), retorno 2027-07-27 (fonte: brasilapi)
+[5/9] violações: ['N5: a equipe já tem 1 afastado(s) no período: 1006 (2027-07-05 a 2027-07-19)']
+[6/9] coordenador: consultou parecer_normas, parecer_escala
+[7/9] redator
+[8/9] protocolo 6f1b47d7
+[9/9] registrar: {'sucesso': True, 'protocolo': '6f1b47d7'}
+{
+  "resultado": "registrado",
+  "protocolo": "6f1b47d7",
+  "despacho": "Indefiro o pedido de férias da matrícula 1004 para o período de 12/07/2027 a 26/07/2027, em razão da sobreposição com o afastamento da matrícula 1006, de 05/07/2027 a 19/07/2027. Sugere-se, para evitar essa sobreposição, o período de 20/07/2027 a 03/08/2027.",
+  "parecer": "**Parecer:** O pedido é de 15 dias corridos (11 úteis), com saldo de 30 dias e nenhum dia vendido. Conforme o parecer normativo, atende aos requisitos de saldo, duração, abono e data de início. A antecedência mínima não pode ser verificada sem a data do pedido, e a aprovação cabe à chefia.\n\nHá conflito N5: o afastamento da matrícula 1006, de 05/07 a 19/07/2027, sobrepõe-se ao pedido de 12/07 a 26/07 — de 12/07 a 19/07 haveria duas pessoas afastadas. Sugestão de período sem essa sobreposição: **20/07 a 03/08/2027**.\n\nEste parecer não decide a aprovação."
+}
+
+=============== C11_diaria_exterior
+[1/9] guardrails
+[2/9] extração: diaria 1003 2027-06-08..2027-06-11
+[3/9] servidor: Carla Nunes (Inteligência)
+[4/9] período: 4 dia(s) útil(eis), retorno 2027-06-14 (fonte: brasilapi)
+[5/9] violações: nenhuma
+[6/9] coordenador: consultou parecer_normas, parecer_financeiro
+[7/9] redator
+[8/9] protocolo ec67dba1
+[9/9] registrar: {'sucesso': True, 'protocolo': 'ec67dba1'}
+{
+  "resultado": "registrado",
+  "protocolo": "ec67dba1",
+  "despacho": "Defiro o pedido de diária da matrícula 1003, referente ao período de 08/06/2027 a 11/06/2027. Não foram apontadas violações objetivas. O cálculo corresponde a 3,5 diárias, no total de US$ 1.120,00 (R$ 5.663,84, pela cotação informada), ficando pendente a verificação da aprovação da chefia imediata, conforme a regra aplicável.",
+  "parecer": "**Parecer:** Para a diária de 08 a 11/06/2027, não há violações objetivas apontadas. A regra exige aprovação da chefia imediata, que ainda deve ser verificada; a decisão de aprovação cabe à chefia.\n\n**Cálculo:** 3 pernoites + meia diária no retorno = **3,5 diárias**.  \n3,5 × US$ 320,00 = **US$ 1.120,00**; pela cotação informada de R$ 5,0570, total de **R$ 5.663,84**."
+}
+```
+
+| Caso | Resultado | Protocolo | Valor calculado pelo Financeiro |
+|---|---|---|---|
+| C1_abono_simples | registrado (deferido, sem chefia) | ae788d33 | não há valor (abono simples) |
+| C2_ferias_com_venda | registrado (deferido; aprovador `pendente_chefia`) | b7b6f485 | R$ 3.166,67 (10 × 9.500 ÷ 30) |
+| C6_conflito_de_escala | registrado (indeferido por N5, com sugestão 20/07 a 03/08/2027) | 6f1b47d7 | não há valor |
+| C11_diaria_exterior | registrado (deferido; aprovador `pendente_chefia`) | ec67dba1 | 3,5 diárias × USD 320 = USD 1.120,00 = R$ 5.663,84 (cotação 5,0570) |
+
+- A sua tabela da Etapa 0 bateu com o `etapa06_regras.py`? **Bateu.** Python decide N1, N2 (limite e soma), N3, N4, N5, N6 e N8 (`precisa_chefia`). O que eu tinha marcado como agente (valor da N2 e N7, a diária) de fato não tem `if` no arquivo: o Financeiro só calcula, não "viola". N9 e N10 também não estão em `etapa06_regras.py`: ficam nos guardrails (regex) e na validação do despacho (Etapas 3 e 7). Não faltou nem sobrou regra objetiva.
+- Quais especialistas o Coordenador consultou no C1? Por que não todos? **Normas e Escala** (`parecer_normas`, `parecer_escala`). Um abono simples não envolve dinheiro, então o Financeiro não é necessário; o Coordenador escolhe só os que precisa (menos chamadas de LLM, menos custo e tempo). Pelo mesmo motivo, no C11 (diária) ele pulou a Escala e consultou Normas e Financeiro.
+- Diferença entre usar um especialista como tool (`as_tool`) e fazer um handoff: com `as_tool`, o Coordenador **continua no controle**: chama o especialista como uma função, recebe a resposta, junta os pareceres e é ele quem responde ao final. No handoff, o controle é **transferido**: o outro agente assume a conversa e responde diretamente. Aqui precisamos de um parecer único consolidado, por isso `as_tool`.
+- Qual agente escreveu cada parte: Normas (regras cumpridas/violadas), Escala (conflito N5 e sugestão de datas), Financeiro (a conta da venda/diária), Coordenador (parecer único) e Redator (o despacho). A decisão deferido/indeferido veio do Python (`violacoes_objetivas`), não de agente.
