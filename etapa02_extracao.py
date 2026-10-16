@@ -99,8 +99,14 @@ INSTRUCOES_EXTRATOR = (
 )
 
 
+TOKENS_ULTIMA_CHAMADA = 0  # ETAPA 10: tokens do último extrator (o nó do grafo repassa ao medido())
+
+
 def extrair(texto: str) -> Pedido:
-    return Runner.run_sync(criar_extrator(INSTRUCOES_EXTRATOR), texto).final_output
+    global TOKENS_ULTIMA_CHAMADA
+    resultado = Runner.run_sync(criar_extrator(INSTRUCOES_EXTRATOR), texto)
+    TOKENS_ULTIMA_CHAMADA = resultado.context_wrapper.usage.total_tokens
+    return resultado.final_output
 
 
 # ------------------------------------------------------------------ 🆕 A: votação (OPCIONAL, bônus)

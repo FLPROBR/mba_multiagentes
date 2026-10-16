@@ -27,13 +27,27 @@ ARQUIVO_METRICAS = SAIDAS / "metricas.jsonl"
 
 
 def medido(nome: str, no):
-    # ETAPA 10.2 -- devolva uma função que:
-    #   1. mede o tempo de no(estado) com time.perf_counter();
-    #   2. grava em ARQUIVO_METRICAS uma linha JSON com: thread_id (estado.get("thread_id")), no, segundos,
-    #      e, se o nó devolveu, "tokens" e "fonte_feriados";
-    #   3. devolve o MESMO dicionário que o nó devolveu.
-    #   Use @functools.wraps(no) para o nome do nó continuar o mesmo.
-    return no  # pass-through: troque pelo wrapper
+    """ETAPA 10.2 -- embrulha o nó: mede o tempo e grava uma linha em saidas/metricas.jsonl."""
+    @functools.wraps(no)
+    def embrulhado(estado):
+        inicio = time.perf_counter()
+        saida = no(estado)
+        linha = {"thread_id": estado.get("thread_id"), "no": nome,
+                 "segundos": round(time.perf_counter() - inicio, 3)}
+        if isinstance(saida, dict):
+            # "tokens" é só para a métrica: sai do dicionário, porque não é um campo do Estado
+            # (e três ramos paralelos escrevendo a mesma chave dariam conflito).
+            saida = dict(saida)
+            tokens = saida.pop("tokens", None)
+            if tokens:
+                linha["tokens"] = tokens
+            if saida.get("periodo"):
+                linha["fonte_feriados"] = saida["periodo"].get("fonte_feriados")
+        SAIDAS.mkdir(exist_ok=True)
+        with ARQUIVO_METRICAS.open("a", encoding="utf-8") as arquivo:
+            arquivo.write(json.dumps(linha, ensure_ascii=False) + "\n")
+        return saida
+    return embrulhado
 
 
 def resumo(thread_id: str) -> dict:

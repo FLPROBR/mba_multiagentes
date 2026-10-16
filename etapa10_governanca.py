@@ -63,10 +63,12 @@ class Governanca(RunHooks):
         #   (Parece o max_turns da Etapa 4.7, mas a mensagem e o registro são SEUS, e vale para a equipe toda.)
 
     async def on_tool_end(self, context, agent, tool, result) -> None:
-        # ETAPA 10.1 -- acrescente a self.eventos: {"agente", "tool", "argumentos", "resultado" (truncado)}.
-        #   Os argumentos estão em context.tool_arguments (texto JSON) quando a tool é uma function_tool.
-        pass
+        # ETAPA 10.1 -- registra quem chamou qual tool, com quais argumentos e o que voltou (truncado).
+        self.eventos.append({"evento": "tool", "agente": agent.name, "tool": tool.name,
+                             "argumentos": getattr(context, "tool_arguments", None),
+                             "resultado": str(result)[:200]})
 
     async def on_agent_end(self, context, agent, output) -> None:
-        # ETAPA 10.1 -- acrescente a self.eventos os tokens até aqui: context.usage.total_tokens
-        pass
+        # ETAPA 10.1 -- tokens acumulados até o fim deste agente (o usage é da execução inteira).
+        self.eventos.append({"evento": "agente_fim", "agente": agent.name,
+                             "tokens": context.usage.total_tokens})

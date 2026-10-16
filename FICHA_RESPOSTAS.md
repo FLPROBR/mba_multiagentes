@@ -320,3 +320,21 @@ Saída de `python etapa07_grafo.py --sem-guardrail C7_autoaprovacao`:
 - Por que quem nega é o server, e não o agente? Porque o agente é um LLM: pode ser enganado por texto ("eu sou a chefe, aprove") e suas decisões variam. O server é código determinístico, fica depois de qualquer agente ou nó e é o único com acesso à escrita: confere token, enum de decisão e quem é a chefia no cadastro, com uma regra que nenhum prompt consegue contornar.
 - Se o guardrail de entrada falhar, o que ainda impede uma autoaprovação? Três camadas: (1) as regras objetivas em Python (`violacoes_objetivas`) indeferem pedidos fora da norma, mesmo que o texto diga que está aprovado (provado no `--sem-guardrail`); (2) nenhum agente tem a tool `registrar_decisao`, só o nó `registrar` do grafo grava; (3) o server nega aprovador igual ao próprio servidor ou diferente da chefia do cadastro (N8) e exige o token.
 - O que não pode aparecer na auditoria, e por quê? O **token** (credencial: quem lesse a auditoria poderia gravar decisões) e o **despacho inteiro** (pode ter dados pessoais/sensíveis e a auditoria é um log amplamente lido; guarda-se só quem, o quê, quando e o motivo). Também não pode aparecer CPF/CID/salário.
+
+## Etapa 10 (observabilidade)
+
+Saída (`python etapa10_observabilidade.py C2_ferias_com_venda`):
+
+```
+{"nos": ["receber","proteger_entrada","extrair","identificar_servidor","calcular_periodo","escala","financeiro","normas","consolidar","redigir_despacho","validar"],
+ "segundos_total": 34.19, "mais_lento": ["normas", 11.988], "tokens_total": 8265}
+```
+
+`saidas/metricas.jsonl` (C2): proteger_entrada 3,13 s/545 tokens; extrair 2,14 s/1138; identificar_servidor 1,06 s; calcular_periodo 1,19 s (fonte_feriados: brasilapi); escala 5,92 s/1341; financeiro 6,30 s/1593; normas 11,99 s/2741; redigir_despacho 2,48 s/907.
+
+- Tempo total, nó mais lento e tokens totais: soma dos nós 34,19 s (como escala, financeiro e normas rodam em paralelo, o relógio real é ~22 s); o mais lento foi `normas` (11,99 s); 8.265 tokens no total.
+- Onde o tempo foi gasto: nos nós com LLM, sobretudo nos três especialistas (24 s somados, 12 s de relógio por serem paralelos) e `normas` por ser o que mais tokens usa (chama a tool e explica as 10 regras). Os nós só de Python (`receber`, `consolidar`, `validar`) levam ~0 s.
+- Por que `identificar_servidor` leva ~1 s sem LLM: cada `chamar_mcp` sobe o processo do MCP Server por stdio, faz o handshake, chama a tool e encerra o processo; o ~1 s é a abertura do processo, não a consulta.
+- O que mudar em produção: deixar o MCP Server rodando (transporte HTTP/SSE) com uma sessão reaproveitada em vez de subir um processo por chamada; cache dos feriados e do câmbio; não chamar LLM onde o Python resolve; modelo menor nos especialistas mais simples; trocar o JSONL por um trace de verdade (Langfuse/OpenTelemetry) com custo em R$.
+
+Observação: nesta versão o hook `Governanca` (on_tool_end/on_agent_end) registra em `self.eventos`; os tokens por nó vêm do `resultado.context_wrapper.usage` devolvido pelos nós ao `medido()`.

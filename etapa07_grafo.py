@@ -58,6 +58,8 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+import etapa02_extracao as extracao
+import etapa03_guardrails as guardrails
 import etapa06_agentes as agentes
 from etapa05_cliente_mcp import chamar_mcp
 from dados.casos import CASOS
@@ -136,10 +138,11 @@ def proteger_entrada(estado: Estado) -> dict:
         if sensivel:
             return {"bloqueado": True, "motivo_bloqueio": MENSAGENS[sensivel], "caminho": ["proteger_entrada"]}
         nota, _ = nota_escopo(estado["texto"])
+        tokens = guardrails.TOKENS_ULTIMA_CHAMADA
         if nota >= LIMIAR:
             return {"bloqueado": True, "motivo_bloqueio": MENSAGENS["fora_do_escopo"], "nota_escopo": nota,
-                    "caminho": ["proteger_entrada"]}
-        return {"bloqueado": False, "nota_escopo": nota, "caminho": ["proteger_entrada"]}
+                    "tokens": tokens, "caminho": ["proteger_entrada"]}
+        return {"bloqueado": False, "nota_escopo": nota, "tokens": tokens, "caminho": ["proteger_entrada"]}
     return {"bloqueado": False, "caminho": ["proteger_entrada"]}  # --sem-guardrail (ETAPA 9.5)
 
 
@@ -164,7 +167,8 @@ def rotear_triagem(estado: Estado) -> str:
 
 def no_extrair(estado: Estado) -> dict:
     pedido, divergencia = extrair(estado["texto"]), False
-    return {"pedido": pedido.model_dump(mode="json"), "divergencia": divergencia, "caminho": ["extrair"]}
+    return {"pedido": pedido.model_dump(mode="json"), "divergencia": divergencia,
+            "tokens": extracao.TOKENS_ULTIMA_CHAMADA, "caminho": ["extrair"]}
 
 
 def rotear_extracao(estado: Estado) -> str:
@@ -200,6 +204,11 @@ def _fatos(estado: Estado) -> str:
             f"PERÍODO: {estado['periodo']}\nESCALA DA EQUIPE: {estado['escala']}")
 
 
+def _tokens(resultado) -> int:
+    """ETAPA 10: tokens gastos por UMA execução de agente (o medido() grava em metricas.jsonl)."""
+    return resultado.context_wrapper.usage.total_tokens
+
+
 def _violacoes_do_estado(estado: Estado) -> list[str]:
     """As violações objetivas (Python) do pedido: os especialistas as recebem para EXPLICAR, não para decidir."""
     return violacoes_objetivas(estado["pedido"], estado["servidor"], estado["periodo"], estado["escala"])
@@ -207,14 +216,14 @@ def _violacoes_do_estado(estado: Estado) -> list[str]:
 
 def no_normas(estado: Estado) -> dict:
     entrada = f"{_fatos(estado)}\nVIOLAÇÕES OBJETIVAS: {_violacoes_do_estado(estado) or 'nenhuma'}"
-    parecer = rodar_com_limites_sync(agentes.criar_normas(), entrada).final_output
-    return {"parecer_normas": parecer, "caminho": ["normas"]}
+    r = rodar_com_limites_sync(agentes.criar_normas(), entrada)
+    return {"parecer_normas": r.final_output, "tokens": _tokens(r), "caminho": ["normas"]}
 
 
 def no_escala(estado: Estado) -> dict:
     entrada = f"{_fatos(estado)}\nVIOLAÇÕES OBJETIVAS: {_violacoes_do_estado(estado) or 'nenhuma'}"
-    parecer = rodar_com_limites_sync(agentes.criar_escala(), entrada).final_output
-    return {"parecer_escala": parecer, "caminho": ["escala"]}
+    r = rodar_com_limites_sync(agentes.criar_escala(), entrada)
+    return {"parecer_escala": r.final_output, "tokens": _tokens(r), "caminho": ["escala"]}
 
 
 def no_financeiro(estado: Estado) -> dict:
@@ -222,8 +231,8 @@ def no_financeiro(estado: Estado) -> dict:
     if pedido["tipo"] == "abono" or (pedido["tipo"] == "ferias" and not pedido.get("dias_vendidos")):
         # sem dinheiro envolvido: não chama o LLM (economiza tokens)
         return {"parecer_financeiro": "não se aplica (sem venda de dias nem diárias)", "caminho": ["financeiro"]}
-    parecer = rodar_com_limites_sync(agentes.criar_financeiro(), _fatos(estado)).final_output
-    return {"parecer_financeiro": parecer, "caminho": ["financeiro"]}
+    r = rodar_com_limites_sync(agentes.criar_financeiro(), _fatos(estado))
+    return {"parecer_financeiro": r.final_output, "tokens": _tokens(r), "caminho": ["financeiro"]}
 
 
 def consolidar(estado: Estado) -> dict:
@@ -245,8 +254,8 @@ Escreva o despacho citando a matrícula, a data de início do período e a decis
         entrada += f"\nCORRIJA O DESPACHO ANTERIOR. Problemas apontados pela validação: {estado['erro_validacao']}"
     if estado.get("feedback_chefia"):
         entrada += f"\nFEEDBACK DA CHEFIA (leve em conta ao redigir): {estado['feedback_chefia']}"
-    despacho = rodar_com_limites_sync(agentes.criar_redator(), entrada).final_output
-    return {"despacho": despacho, "caminho": ["redigir_despacho"]}
+    r = rodar_com_limites_sync(agentes.criar_redator(), entrada)
+    return {"despacho": r.final_output, "tokens": _tokens(r), "caminho": ["redigir_despacho"]}
 
 
 def problemas_do_despacho(despacho: str, pedido: dict) -> list[str]:

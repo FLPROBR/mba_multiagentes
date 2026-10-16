@@ -81,8 +81,14 @@ def criar_classificador() -> Agent:
     )
 
 
+TOKENS_ULTIMA_CHAMADA = 0  # ETAPA 10: tokens do último classificador (o nó do grafo repassa ao medido())
+
+
 def nota_escopo(texto: str) -> tuple[float, str]:
-    avaliacao = Runner.run_sync(criar_classificador(), texto).final_output
+    global TOKENS_ULTIMA_CHAMADA
+    resultado = Runner.run_sync(criar_classificador(), texto)
+    TOKENS_ULTIMA_CHAMADA = resultado.context_wrapper.usage.total_tokens
+    avaliacao = resultado.final_output
     return avaliacao.nota, avaliacao.motivo
 
 

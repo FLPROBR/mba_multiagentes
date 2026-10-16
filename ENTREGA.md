@@ -53,8 +53,8 @@ Compare **caminho e estado**, não o texto do despacho.
 
 ## Observabilidade (C2)
 
-- Onde o tempo foi gasto:
-- Tokens totais: ___
+- Onde o tempo foi gasto: nos nós com LLM, sobretudo nos três especialistas (`normas` 12 s, `financeiro` 6 s, `escala` 6 s; paralelos, ~12 s de relógio) e no extrator/classificador (~2-3 s cada); `identificar_servidor` e `calcular_periodo` levam ~1 s cada (sobem o MCP / chamam API); soma dos nós 34 s, mais lento `normas`.
+- Tokens totais: 8.265
 
 ## Opcionais (preencha só os que fez)
 
