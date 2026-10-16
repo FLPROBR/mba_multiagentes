@@ -95,3 +95,22 @@ protocolo C1=ae788d33 C8=ae788d33 iguais=True
 - Por que a espera do retry dobra a cada tentativa (0,5 s, 1 s, 2 s...): é o backoff exponencial. Se a API está sobrecarregada ou instável, insistir logo em seguida só piora e não dá tempo de ela se recuperar; esperar cada vez mais alivia o servidor e aumenta a chance de a próxima tentativa funcionar, sem martelar a API.
 - Por que o protocolo é um hash dos campos e não um número sequencial: o mesmo pedido (mesma matrícula, tipo e datas) sempre gera o mesmo protocolo (C1 e C8 = `ae788d33`), então reenviar o pedido não cria um registro duplicado (idempotência). Um sequencial daria um número novo a cada envio e duplicaria.
 - O que aconteceria sem o cache de feriados: `dias_uteis` pergunta dia por dia, então cada consulta chamaria a BrasilAPI de novo (dezenas de chamadas por pedido), deixando tudo lento, gastando a cota da API e, offline, repetindo as esperas do retry a cada dia consultado.
+
+## Etapa 5 (MCP Server do RH)
+Saída de `python etapa05_cliente_mcp.py` (ainda sem a Etapa 9: a última linha só passará a ser negada depois da 9.2):
+```
+{'matricula': '1002', 'nome': 'Bruno Castro', 'cargo': 'Escrivão', 'equipe': 'Plantão A', 'saldo_ferias_dias': 30, 'abonos_restantes': 3, 'chefia': '1010'}
+{'equipe': 'Cartório', 'tamanho_equipe': 4, 'limite_afastados': 1, 'afastamentos': [{'matricula': '1006', 'equipe': 'Cartório', 'inicio': '2027-07-05', 'fim': '2027-07-19', 'tipo': 'ferias'}]}
+{'tema': 'abono', 'regras': [{'codigo': 'N6', 'tema': 'abono', 'regra': 'Abono (folga) é de **1 dia útil** por pedido, limitado a `abonos_restantes`. Não pode cair em fim de semana nem em feriado.'}]}
+1ª gravação: {'sucesso': True, 'protocolo': 'teste001'}
+2ª gravação: {'sucesso': True, 'duplicado': True, 'protocolo': 'teste001'}  <- deve dizer duplicado
+{"sem_token": {"sucesso": true, "duplicado": true, "protocolo": "teste001"}}  <- depois da Etapa 9.2, deve ser negado
+```
+Saída de `python etapa05_cliente_mcp.py --agente`:
+```
+[modelo] openrouter:openai/gpt-6-luna
+Sim. Há um servidor de férias de 5 a 19 de julho de 2027, período que se sobrepõe ao intervalo consultado.
+```
+- Quantas tools o MCP Inspector listou? **6**: consultar_servidor, consultar_escala, consultar_normas, tabela_diarias, consultar_remuneracao e registrar_decisao (conferido com o Inspector em modo linha de comando, `--cli --method tools/list`).
+- Por que toda tool do server devolve um dict, e não uma lista? Uma tool MCP que devolve lista manda cada item como um conteúdo separado; quem chama não distingue "lista com 1 item" de "1 dict" e o cliente (`chamar_mcp`) lê só o primeiro conteúdo como JSON. Com sempre um dict o formato é previsível (por isso `consultar_normas` devolve `{"tema":..., "regras":[...]}`).
+- O que acontece quando grava o mesmo protocolo duas vezes? A 2ª chamada não grava de novo: o server vê que o protocolo já existe em `registros.json` e devolve `{"sucesso": True, "duplicado": True, "protocolo": ...}`. Fica um único registro (idempotência).
