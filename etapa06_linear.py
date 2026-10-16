@@ -39,26 +39,75 @@ MODELO = configurar()
 
 
 def analisar(pedido: dict, servidor: dict, periodo: dict, violacoes: list[str], hooks: RunHooks | None = None) -> str:
-    # ETAPA 6.3 -- monte um texto com o pedido, o servidor (matrícula e equipe), o período e as violações objetivas,
-    #   e rode criar_coordenador(hooks) com rodar_com_limites_sync(..., hooks=hooks). Devolva final_output.
-    raise NotImplementedError("ETAPA 6.3: analisar")
+    entrada = f"""Pedido: tipo={pedido['tipo']}, matrícula={servidor['matricula']}, equipe={servidor['equipe']},
+período {pedido['data_inicio']} a {pedido['data_fim']} ({periodo['dias_corridos']} dias corridos, {periodo['dias_uteis']} úteis),
+dias vendidos={pedido['dias_vendidos']}, destino={pedido['destino']} (tipo_destino={pedido['tipo_destino']}).
+Saldo de férias: {servidor['saldo_ferias_dias']} dias. Feriados no período: {periodo['feriados_no_periodo'] or 'nenhum'}.
+Violações objetivas já calculadas pelo sistema: {violacoes or 'nenhuma'}."""
+    resultado = rodar_com_limites_sync(agentes.criar_coordenador(hooks), entrada, hooks=hooks)
+    usados = [i.raw_item.name for i in resultado.new_items if i.type == "tool_call_item"]
+    print(f"[6/9] coordenador: consultou {', '.join(usados) or 'nenhum especialista'}")
+    return resultado.final_output
 
 
 def processar(texto: str, hooks: RunHooks | None = None) -> dict:
-    # ETAPA 6.4 -- encadeie, imprimindo cada passo ("[1/9] guardrails", ...):
-    #   1. encontrar_dado_sensivel / nota_escopo >= LIMIAR  -> devolva {"resultado": "bloqueado", "mensagem": ...}
-    #   2. pedido = extrair(texto).model_dump(mode="json")  -> sem matrícula ou datas: {"resultado": "pedir_dados"}
-    #   3. servidor = chamar_mcp("consultar_servidor", ...) -> não encontrado: {"resultado": "pedir_dados"}
-    #   4. periodo = resumo_periodo(...)                     (API de feriados, Etapa 4)
-    #   5. escala = chamar_mcp("consultar_escala", ...); violacoes = violacoes_objetivas(...)
-    #   6. parecer = analisar(...)
-    #   7. despacho = rodar_com_limites_sync(agentes.criar_redator(), <fatos + parecer + violações>).final_output
-    #   8. protocolo = gerar_protocolo(...)
-    #   9. chamar_mcp("registrar_decisao", {..., "decisao": "indeferido" se houver violação senão "deferido",
-    #        "aprovador": "pendente_chefia" se precisa_chefia(...) senão "sistema", "token": os.getenv("TOKEN_REGISTRO")})
-    #      (a aprovação de verdade da chefia entra na Etapa 8; aqui só marcamos que ela será necessária)
-    #   Devolva {"resultado": ..., "protocolo": ..., "despacho": ..., "parecer": ...}.
-    raise NotImplementedError("ETAPA 6.4: processar")
+    # 1. guardrails (regex primeiro, depois o classificador)
+    print("[1/9] guardrails")
+    sensivel = encontrar_dado_sensivel(texto)
+    if sensivel:
+        return {"resultado": "bloqueado", "mensagem": MENSAGENS[sensivel]}
+    nota, _ = nota_escopo(texto)
+    if nota >= LIMIAR:
+        return {"resultado": "bloqueado", "mensagem": MENSAGENS["fora_do_escopo"]}
+
+    # 2. extração
+    pedido = extrair(texto).model_dump(mode="json")
+    print(f"[2/9] extração: {pedido['tipo']} {pedido['matricula']} {pedido['data_inicio']}..{pedido['data_fim']}")
+    if (not pedido["matricula"] or not pedido["data_inicio"] or not pedido["data_fim"]
+            or pedido["tipo"] not in ("ferias", "abono", "diaria")):
+        return {"resultado": "pedir_dados", "mensagem": "Informe a matrícula, o tipo (férias, abono ou diária) e as datas exatas."}
+
+    # 3. servidor (MCP)
+    servidor = chamar_mcp("consultar_servidor", {"matricula": pedido["matricula"]})
+    if "erro" in servidor:
+        return {"resultado": "pedir_dados", "mensagem": f"Matrícula {pedido['matricula']} não encontrada."}
+    print(f"[3/9] servidor: {servidor['nome']} ({servidor['equipe']})")
+
+    # 4. período (API de feriados)
+    periodo = resumo_periodo(pedido["data_inicio"], pedido["data_fim"])
+    print(f"[4/9] período: {periodo['dias_uteis']} dia(s) útil(eis), retorno {periodo['retorno']} (fonte: {periodo['fonte_feriados']})")
+
+    # 5. escala (MCP) e regras objetivas (Python)
+    escala = chamar_mcp("consultar_escala", {"equipe": servidor["equipe"], "inicio": pedido["data_inicio"], "fim": pedido["data_fim"]})
+    violacoes = violacoes_objetivas(pedido, servidor, periodo, escala)
+    print(f"[5/9] violações: {violacoes or 'nenhuma'}")
+
+    # 6. coordenador (Normas, Escala e Financeiro como tools)
+    parecer = analisar(pedido, servidor, periodo, violacoes, hooks)
+
+    # 7. redator
+    decisao = "indeferido" if violacoes else "deferido"
+    print("[7/9] redator")
+    fatos = f"""Decisão: {decisao}. Matrícula: {pedido['matricula']}. Tipo: {pedido['tipo']}.
+Período: {pedido['data_inicio']} a {pedido['data_fim']}.
+Violações objetivas: {violacoes or 'nenhuma'}.
+Parecer dos especialistas: {parecer}"""
+    despacho = rodar_com_limites_sync(agentes.criar_redator(), fatos, hooks=hooks).final_output
+
+    # 8. protocolo (hash dos campos: idempotente)
+    protocolo = gerar_protocolo(pedido["matricula"], pedido["tipo"], pedido["data_inicio"], pedido["data_fim"])
+    print(f"[8/9] protocolo {protocolo}")
+
+    # 9. registrar (MCP). A aprovação de verdade da chefia entra na Etapa 8; aqui só marcamos que será necessária.
+    aprovador = "pendente_chefia" if precisa_chefia(pedido, violacoes) else "sistema"
+    registro = chamar_mcp("registrar_decisao", {
+        "protocolo": protocolo, "matricula": pedido["matricula"], "tipo": pedido["tipo"],
+        "inicio": pedido["data_inicio"], "fim": pedido["data_fim"], "decisao": decisao,
+        "aprovador": aprovador, "despacho": despacho, "token": os.getenv("TOKEN_REGISTRO", ""),
+        "thread_id": "linear"})
+    print(f"[9/9] registrar: {registro}")
+    return {"resultado": "registrado" if registro.get("sucesso") else "negado", "protocolo": protocolo,
+            "despacho": despacho, "parecer": parecer}
 
 
 def testar_governanca() -> None:
