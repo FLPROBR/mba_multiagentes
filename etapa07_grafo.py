@@ -103,6 +103,7 @@ class Estado(TypedDict, total=False):
     erro_validacao: str
     rejeicoes: int
     feedback_chefia: str
+    aprovado: bool                # decisão da chefia (ETAPA 8)
     aprovador: str
     protocolo: str
     resultado: str                # o desfecho, para a tabela da Etapa 11
@@ -274,37 +275,56 @@ def rotear_validacao(estado: Estado) -> str:
         return "redigir"
     # válido, ou estourou as tentativas
     if precisa_chefia(estado["pedido"], estado["violacoes"]):
-        return "chefia"  # (até a Etapa 8, o construir() manda "chefia" para "registrar")
+        return "chefia"
     return "registrar"
 
 
 # ------------------------------------------------------------------ ETAPA 8: a chefia
 def aprovacao_chefia(estado: Estado) -> dict:
-    # ETAPA 8.2 -- resposta = interrupt({"pergunta": "Aprova o despacho?", "chefia": estado["servidor"]["chefia"],
-    #                                    "resumo": <servidor, período, pareceres, despacho>})
-    #   `resposta` = {"aprovado": bool, "aprovador": str, "motivo": str} (o que o retomar() entregar).
-    #   Aprovado  -> {"aprovador": ..., "feedback_chefia": ""}
-    #   Rejeitado -> {"rejeicoes": +1, "feedback_chefia": motivo, "aprovador": ...}
-    #   NADA de gravar antes do interrupt(): na retomada, o nó roda de novo desde o começo.
-    #   Referência: aula7/exemplos/07_aprovacao_revisao/main.py
-    raise NotImplementedError("ETAPA 8.2: aprovacao_chefia")
+    # Este print está ANTES do interrupt() de propósito: ele prova que o nó roda DE NOVO na retomada.
+    print(f"[aprovacao_chefia] nó iniciado (rejeições até aqui: {estado.get('rejeicoes', 0)})")
+    servidor = estado["servidor"]
+    # NADA com efeito colateral (gravar, notificar) antes do interrupt(): na retomada o nó recomeça do início.
+    resposta = interrupt({
+        "pergunta": "Aprova o despacho?",
+        "chefia": servidor["chefia"],
+        "resumo": {
+            "servidor": f"{servidor['nome']} ({servidor['matricula']}, {servidor['equipe']})",
+            "periodo": f"{estado['pedido']['data_inicio']} a {estado['pedido']['data_fim']}",
+            "pareceres": {"normas": estado["parecer_normas"], "escala": estado["parecer_escala"],
+                          "financeiro": estado["parecer_financeiro"]},
+            "despacho_proposto": estado["despacho"],
+        },
+    })
+    if resposta["aprovado"]:
+        return {"aprovado": True, "aprovador": resposta["aprovador"], "feedback_chefia": "",
+                "caminho": ["aprovacao_chefia"]}
+    # Rejeitado: o motivo vira feedback para o Redator; zera o ciclo de validação para a nova redação.
+    return {"aprovado": False, "aprovador": resposta["aprovador"], "feedback_chefia": resposta["motivo"],
+            "rejeicoes": estado.get("rejeicoes", 0) + 1, "tentativas": 0, "erro_validacao": "",
+            "caminho": ["aprovacao_chefia"]}
 
 
 def rotear_chefia(estado: Estado) -> str:
-    # ETAPA 8.3 -- aprovado -> "registrar"; rejeitado e rejeicoes < MAX_REJEICOES -> "redigir";
-    #              rejeitado de novo -> "registrar" (com decisao "indeferido_pela_chefia": ajuste no registrar)
-    raise NotImplementedError("ETAPA 8.3: rotear_chefia")
+    if estado["aprovado"]:
+        return "registrar"
+    if estado["rejeicoes"] < MAX_REJEICOES:
+        return "redigir"
+    return "registrar"  # rejeitou de novo: registra como "indeferido_pela_chefia" (ver registrar)
 
 
 # ------------------------------------------------------------------ ETAPA 7.5 / 9.4: registrar
 def registrar(estado: Estado) -> dict:
     pedido = estado["pedido"]
     protocolo = gerar_protocolo(pedido["matricula"], pedido["tipo"], pedido["data_inicio"], pedido["data_fim"])
-    decisao = "indeferido_pela_chefia" if estado.get("rejeicoes", 0) >= MAX_REJEICOES else estado["decisao"]
+    decisao, despacho = estado["decisao"], estado["despacho"]
+    if estado.get("rejeicoes", 0) >= MAX_REJEICOES:
+        decisao = "indeferido_pela_chefia"
+        despacho = f"Indeferido pela chefia ({estado.get('aprovador')}): {estado.get('feedback_chefia')}. {despacho}"
     registro = chamar_mcp("registrar_decisao", {
         "protocolo": protocolo, "matricula": pedido["matricula"], "tipo": pedido["tipo"],
         "inicio": pedido["data_inicio"], "fim": pedido["data_fim"], "decisao": decisao,
-        "aprovador": estado.get("aprovador") or "sistema", "despacho": estado["despacho"],
+        "aprovador": estado.get("aprovador") or "sistema", "despacho": despacho,
         "token": os.getenv("TOKEN_REGISTRO", ""), "thread_id": estado["thread_id"]})
     if not registro.get("sucesso"):
         resultado = "negado_pelo_server"
@@ -341,9 +361,10 @@ def construir(checkpointer=None):
     construtor.add_edge(["normas", "escala", "financeiro"], "consolidar")  # fan-in: LISTA = espera os três
     construtor.add_edge("consolidar", "redigir_despacho")
     construtor.add_edge("redigir_despacho", "validar")
-    # Até a Etapa 8 ainda não há o nó da chefia: "chefia" segue para "registrar".
     construtor.add_conditional_edges("validar", rotear_validacao,
-                                     {"redigir": "redigir_despacho", "chefia": "registrar", "registrar": "registrar"})
+                                     {"redigir": "redigir_despacho", "chefia": "aprovacao_chefia", "registrar": "registrar"})
+    construtor.add_conditional_edges("aprovacao_chefia", rotear_chefia,
+                                     {"redigir": "redigir_despacho", "registrar": "registrar"})
     for final in ("recusar", "pedir_dados", "registrar"):
         construtor.add_edge(final, END)
     return construtor.compile(checkpointer=checkpointer)
@@ -390,15 +411,21 @@ def listar_pendentes(app, checkpointer) -> None:
 
 
 def retomar(app, thread_id: str, resposta: str, quem: str) -> None:
-    # ETAPA 8.4 -- veja ONDE a execução parou: app.get_state(config_de(thread_id)).next
-    #   - ("aprovacao_chefia",): valor = {"aprovado": resposta == "sim", "aprovador": quem,
-    #                                    "motivo": o texto depois de "nao:"}
-    #   - ("triagem_humana",)  : valor = {"segue": resposta começa com "sim", "orientacao": o texto depois de ":",
-    #                                    "quem": quem}                                    (só com o 🆕 C, opcional)
-    #   saida = app.invoke(Command(resume=valor), config_de(thread_id)); mostrar(app, thread_id, saida)
-    #   Nada pausado? Diga isso e não faça nada (e se retomarem duas vezes?).
-    #   Referência: aula7/exemplos/06_human_in_the_loop/main.py (retomar)
-    raise NotImplementedError("ETAPA 8.4: retomar")
+    proximo = app.get_state(config_de(thread_id)).next
+    if not proximo:
+        print(f"[{thread_id}] nada pausado: não há o que retomar (já concluído, ou retomado antes).")
+        return
+    if proximo == ("aprovacao_chefia",):
+        motivo = resposta.split(":", 1)[1] if resposta.startswith("nao:") else ""
+        valor = {"aprovado": resposta == "sim", "aprovador": quem, "motivo": motivo}
+    elif proximo == ("triagem_humana",):  # 🆕 C (opcional)
+        valor = {"segue": resposta.startswith("sim"), "quem": quem,
+                 "orientacao": resposta.split(":", 1)[1] if ":" in resposta else ""}
+    else:
+        print(f"[{thread_id}] pausado em {proximo}, que o retomar() não conhece.")
+        return
+    saida = app.invoke(Command(resume=valor), config_de(thread_id))
+    mostrar(app, thread_id, saida)
 
 
 def main() -> None:

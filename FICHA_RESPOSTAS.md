@@ -224,3 +224,55 @@ Outros casos do grafo (ainda sem a chefia, que entra na Etapa 8): C2 `b7b6f485`,
 - Em que ordem os ramos normas, escala e financeiro apareceram? Por que a ordem pode variar? Apareceram como `escala -> financeiro -> normas` (a ordem em que os ramos terminam/são registrados). Os três rodam no **mesmo passo** (fan-out) em paralelo e cada um leva um tempo diferente (chamadas de LLM variam), então a ordem entre eles não é fixa; o que é garantido é que os três vêm antes de `consolidar`, que aparece uma única vez (fan-in com lista espera os três).
 - O que aconteceu quando tirei o reducer de `violacoes` (experimento 7.1)? Fiz um experimento isolado com dois ramos paralelos escrevendo em `violacoes`. **Sem reducer:** `InvalidUpdateError: At key 'violacoes': Can receive only one value per step. Use an Annotated key to handle multiple values.` **Com `Annotated[list[str], operator.add]`:** as listas se somam: `['N5: da escala', 'N3: da normas']`. O reducer diz ao LangGraph como combinar escritas simultâneas no mesmo campo.
 - O ciclo `redigir_despacho -> validar` repetiu alguma vez? **Não**, em nenhum dos casos rodados (todos passaram na 1ª validação; `erro_validacao` vazio). Isso porque ajustei as instruções do Redator para citar matrícula, início do período e a palavra "deferido/indeferido". Testei o mecanismo à parte: com o despacho "Defiro o abono." o `validar` devolve `erro_validacao = "cite a matrícula 1001; cite o início do período (2027-04-09); diga a decisão (deferido ou indeferido)"`, o roteador manda voltar a `redigir` nas tentativas 1 e 2 e segue para frente na 3ª (limite `MAX_TENTATIVAS = 3`).
+
+## Etapa 8 (persistência e aprovação da chefia)
+Sequência no C2 (cada comando é um processo diferente; `saidas/` limpa antes):
+```
+$ python etapa07_grafo.py C2_ferias_com_venda
+[tool] consultar_remuneracao(1002) EXECUTOU
+[aprovacao_chefia] nó iniciado (rejeições até aqui: 0)
+
+[C2_ferias_com_venda] caminho: receber -> proteger_entrada -> extrair -> identificar_servidor -> calcular_periodo -> escala -> financeiro -> normas -> consolidar -> redigir_despacho -> validar
+[C2_ferias_com_venda] PAUSADO em ('aprovacao_chefia',): Aprova o despacho?
+   retome com: python etapa07_grafo.py --retomar C2_ferias_com_venda sim|"nao:motivo" <quem>
+
+$ python etapa07_grafo.py --pendentes
+C2_ferias_com_venda: PAUSADO em ('aprovacao_chefia',)
+
+$ python etapa07_grafo.py --retomar C2_ferias_com_venda "nao:cite que a venda de 10 dias foi conferida pela chefia" 1010
+[aprovacao_chefia] nó iniciado (rejeições até aqui: 0)
+[aprovacao_chefia] nó iniciado (rejeições até aqui: 1)
+
+[C2_ferias_com_venda] caminho: receber -> proteger_entrada -> extrair -> identificar_servidor -> calcular_periodo -> escala -> financeiro -> normas -> consolidar -> redigir_despacho -> validar -> aprovacao_chefia -> redigir_despacho -> validar
+[C2_ferias_com_venda] PAUSADO em ('aprovacao_chefia',): Aprova o despacho?
+
+$ python etapa07_grafo.py --pendentes
+C2_ferias_com_venda: PAUSADO em ('aprovacao_chefia',)
+
+$ python etapa07_grafo.py --retomar C2_ferias_com_venda sim 1010
+[aprovacao_chefia] nó iniciado (rejeições até aqui: 1)
+
+[C2_ferias_com_venda] caminho: receber -> proteger_entrada -> extrair -> identificar_servidor -> calcular_periodo -> escala -> financeiro -> normas -> consolidar -> redigir_despacho -> validar -> aprovacao_chefia -> redigir_despacho -> validar -> aprovacao_chefia -> registrar
+[C2_ferias_com_venda] resultado: registrado  protocolo: b7b6f485
+[C2_ferias_com_venda] despacho: Pedido de férias do servidor matrícula 1002, para o período de 12/04/2027 a 26/04/2027, **deferido**. A venda de 10 dias foi conferida pela chefia, no valor de R$ 3.166,67.
+
+$ python etapa07_grafo.py --pendentes
+C2_ferias_com_venda: concluído
+```
+Saída de `--retomar C11_diaria_exterior sim 1011` (duas vezes seguidas, após rodar o C11, que pausou):
+```
+$ python etapa07_grafo.py --retomar C11_diaria_exterior sim 1011      (1ª vez)
+[aprovacao_chefia] nó iniciado (rejeições até aqui: 0)
+
+[C11_diaria_exterior] caminho: receber -> proteger_entrada -> extrair -> identificar_servidor -> calcular_periodo -> escala -> financeiro -> normas -> consolidar -> redigir_despacho -> validar -> aprovacao_chefia -> registrar
+[C11_diaria_exterior] resultado: registrado  protocolo: ec67dba1
+[C11_diaria_exterior] despacho: Pedido de diária da matrícula 1003, para o período de 08/06/2027 a 11/06/2027, **deferido**. Conforme a regra N7, são devidas 3,5 diárias, totalizando US$ 1.120,00, equivalentes a R$ 5.663,84, pela cotação de R$ 5,0570 por dólar.
+
+$ python etapa07_grafo.py --retomar C11_diaria_exterior sim 1011      (2ª vez)
+[C11_diaria_exterior] nada pausado: não há o que retomar (já concluído, ou retomado antes).
+```
+Sem pausa: C1 (`ae788d33`), C6 (`6f1b47d7`) e C12 (`7c458e62`) registraram direto.
+
+- O segundo despacho do C2 levou em conta o motivo da chefia? **Sim.** A chefia rejeitou com "cite que a venda de 10 dias foi conferida pela chefia" e o novo despacho passou a dizer "A venda de 10 dias foi conferida pela chefia, no valor de R$ 3.166,67." O motivo vira `feedback_chefia` no estado e o `redigir_despacho` o envia ao Redator.
+- O print no começo de `aprovacao_chefia` apareceu quantas vezes? **Duas vezes para cada decisão da chefia**: uma quando o nó roda e pausa no `interrupt()` e outra quando a execução é retomada, porque o nó recomeça do início (por isso nada com efeito colateral, como gravar ou notificar, pode ficar antes do `interrupt()`). Na retomada do C11 aparece uma só linha porque a primeira foi em outro processo, na execução anterior; no `nao:` do C2 aparecem duas linhas (a reexecução do nó com 0 rejeições e a nova pausa com 1).
+- O que faz a pausa sobreviver ao fim do processo? O **checkpointer SQLite** (`saidas/checkpoints.db`): a cada passo o LangGraph grava o estado em disco, ligado ao `thread_id`. Outro processo abre o mesmo arquivo, vê com `get_state().next` onde parou e continua com `Command(resume=...)`, sem depender da memória do processo anterior.
