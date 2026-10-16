@@ -2,7 +2,7 @@
 
 **Aluno(s):** Filipe Ribeiro de Oliveira
 **Até onde chegou:** (x) Marco mínimo (Etapa 6)  (x) Marco completo (Etapa 9)  (x) Etapas 10–11
-**Opcionais e bônus feitos:** nenhum (🆕 A, B e C não feitos)
+**Opcionais e bônus feitos:** (x) 🆕 A  (x) 🆕 B  (x) 🆕 C  ( ) Outro
 
 ## Etapa 0: quem verifica cada regra?
 
@@ -34,7 +34,7 @@ Compare **caminho e estado**, não o texto do despacho.
 | C7_autoaprovacao | receber → proteger_entrada → recusar | bloqueado (fora do escopo / manipulação) | Sim |
 | C8_idempotencia | igual ao C1 | duplicado, protocolo ae788d33 (o mesmo do C1) | Sim |
 | C9_divergencia | receber → proteger_entrada → extrair → pedir_dados | pediu dados (pedido vago, o extrator deixou as datas em branco) | Sim |
-| C10_zona_cinzenta | receber → proteger_entrada → extrair → pedir_dados | pediu dados (nota 0,50 < LIMIAR 0,7; tipo "outro") | Sim |
+| C10_zona_cinzenta | receber → proteger_entrada → **pausa** em triagem_humana (🆕 C ligado; nota 0,50 fica entre 0,4 e 0,8). Sem o 🆕 C: receber → proteger_entrada → extrair → pedir_dados | pausou na triagem; com `sim` → extrair → pedir_dados (tipo "outro", sem datas); com `nao` → recusar | Sim |
 | C11_diaria_exterior | … → validar → **pausa** em aprovacao_chefia → (sim 1011) → registrar | pausou na chefia; após `sim 1011`: registrado (deferido, 3,5 diárias = US$ 1.120 = R$ 5.663,84), protocolo ec67dba1 | Sim |
 | C12_inicio_proibido | … → consolidar → redigir_despacho → validar → registrar | registrado (indeferido, N3), protocolo 7c458e62 | Sim |
 
@@ -63,6 +63,7 @@ graph TD;
 	validar(validar)
 	aprovacao_chefia(aprovacao_chefia)
 	registrar(registrar)
+	triagem_humana(triagem_humana)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> receber;
 	aprovacao_chefia -. &nbsp;redigir&nbsp; .-> redigir_despacho;
@@ -80,8 +81,11 @@ graph TD;
 	normas --> consolidar;
 	proteger_entrada -. &nbsp;ok&nbsp; .-> extrair;
 	proteger_entrada -. &nbsp;bloqueado&nbsp; .-> recusar;
+	proteger_entrada -. &nbsp;duvida&nbsp; .-> triagem_humana;
 	receber --> proteger_entrada;
 	redigir_despacho --> validar;
+	triagem_humana -. &nbsp;segue&nbsp; .-> extrair;
+	triagem_humana -. &nbsp;recusa&nbsp; .-> recusar;
 	validar -. &nbsp;chefia&nbsp; .-> aprovacao_chefia;
 	validar -. &nbsp;redigir&nbsp; .-> redigir_despacho;
 	validar -.-> registrar;
@@ -107,9 +111,16 @@ graph TD;
 
 ## Opcionais (preencha só os que fez)
 
-- 🆕 A: votos e decisão do C9: ___ ; tempo dos 3 extratores em paralelo ___ s, em sequência ___ s
+- 🆕 A: votos e decisão do C9: os 3 votos foram iguais (tipo=ferias, datas None..None, sem venda), então sem divergência; o sistema pede as datas (`pedir_dados`) porque nenhum extrator inventou data. C1 e C2 saíram unânimes. Tempo dos 3 extratores em paralelo (C2): 2,8 s; em sequência: 8,3 s (o paralelo fica perto do tempo de UMA chamada). Custo: o nó `extrair` do C2 foi de 1.141 para 3.547 tokens (~3,1x, +2.406).
 - 🆕 B: saída do `python etapa06_linear.py --governanca`:
+  - a) Coordenador com a tool `consultar_remuneracao` (fora da lista dele): `[governança] Coordenador -> consultar_remuneracao: BLOQUEADO (Coordenador não pode usar consultar_remuneracao)`; o print `[tool] consultar_remuneracao EXECUTOU` não apareceu (a tool não rodou).
+  - b) C2 com `max_tools=1`: `Coordenador -> parecer_normas: OK`, `parecer_escala: BLOQUEADO (orçamento de tools estourado (2 de 1))`, `parecer_financeiro: BLOQUEADO`; `parado pela governança`.
+  - c) C2 com limites normais: 7 tools chamadas, todas `OK`, o Financeiro é o único a usar `consultar_remuneracao`.
 - 🆕 C: caminho do C10 com a triagem humana (sim e não):
+  - nota do C10 = 0,50 (C1 e C2 = 0,00, C4 = 1,00); faixas `LIMIAR_OK` 0,4 e `LIMIAR_BLOQUEIO` 0,8.
+  - sim: `receber -> proteger_entrada -> triagem_humana -> extrair -> pedir_dados`
+  - não: `receber -> proteger_entrada -> triagem_humana -> recusar` (despacho com a orientação do atendente)
+  - C1 não pausou nenhuma vez; a decisão do atendente entra em `saidas/auditoria.jsonl` (`tool: triagem_humana`, ALLOW/DENY).
 
 ## Reflexão (até 3 linhas cada)
 
@@ -127,8 +138,11 @@ graph TD;
 5. O que você mudaria para colocar este sistema em produção?
    - **Resposta:** MCP Server permanente (HTTP) com sessão reaproveitada em vez de um processo por chamada; cache de feriados/câmbio; autenticação real da chefia no lugar do texto "sim 1010"; checkpoint em banco servidor; traces com custo; testes automáticos dos 12 casos.
 6. (Só se fez) 🆕 A: votar triplica o custo da extração. Em que pedidos vale a pena?
+   - **Resposta:** Em pedidos vagos ou de alto impacto (venda de férias, diária no exterior), onde um erro de data ou tipo custa caro; para um abono simples e claro, um extrator basta.
 7. (Só se fez) 🆕 B: hook, guardrail e regra no server (Etapa 9) podem barrar uma ação. Qual a diferença de **onde** cada um atua?
+   - **Resposta:** O guardrail atua na entrada/saída do texto; o hook, no meio da execução do agente (antes de cada tool ou chamada ao modelo); a regra do server, no último ponto, antes de gravar, e vale para qualquer cliente, mesmo que o agente e o hook falhem.
 8. (Só se fez) 🆕 C: o que muda quando o humano decide a **entrada** em vez da **saída**? Quem é consultado em cada pausa?
+   - **Resposta:** Na entrada o humano decide se o texto vira pedido (antes de gastar tokens e tocar em dados); na saída aprova um parecer pronto. Na triagem quem decide é o atendente do RH; na aprovação, a chefia imediata. Um pedido pode pausar duas vezes, por pessoas diferentes.
 
 ## De onde veio cada parte
 

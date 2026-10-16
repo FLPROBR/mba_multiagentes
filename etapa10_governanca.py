@@ -38,8 +38,10 @@ class LimiteExcedido(AgentsException):
 #   Os especialistas usam as tools de etapa06_agentes.py; o Coordenador só chama os especialistas (os tool_name das as_tool).
 #   O salário (consultar_remuneracao) só pode passar pelo Financeiro.
 PERMISSOES: dict[str, set[str]] = {
-    # "Normas": {"consultar_normas"},
-    # TODO 🆕 B.1: complete para Escala, Financeiro e Coordenador
+    "Normas": {"consultar_normas"},
+    "Escala": {"consultar_escala"},
+    "Financeiro": {"tabela_diarias", "consultar_remuneracao", "cotacao_dolar"},  # o salário só passa por aqui
+    "Coordenador": {"parecer_normas", "parecer_escala", "parecer_financeiro"},   # só chama os especialistas
 }
 
 
@@ -52,15 +54,31 @@ class Governanca(RunHooks):
 
     async def on_tool_start(self, context, agent, tool) -> None:
         self.tools_chamadas += 1
-        # 🆕 B.2 (opcional) -- levante LimiteExcedido se:
-        #   - tool.name não está em PERMISSOES.get(agent.name, set())   -> "Coordenador não pode usar consultar_remuneracao"
-        #   - self.tools_chamadas > self.max_tools                       -> "orçamento de tools estourado (N de M)"
-        #   Imprima a decisão quando self.verbose (ex.: "[governança] Financeiro -> tabela_diarias: OK").
+        # 🆕 B.2 -- roda ANTES da tool: se levantar LimiteExcedido, a tool NÃO executa.
+        if tool.name not in PERMISSOES.get(agent.name, set()):
+            motivo = f"{agent.name} não pode usar {tool.name}"
+            self.eventos.append({"evento": "bloqueado", "agente": agent.name, "tool": tool.name, "motivo": motivo})
+            if self.verbose:
+                print(f"[governança] {agent.name} -> {tool.name}: BLOQUEADO ({motivo})")
+            raise LimiteExcedido(motivo)
+        if self.tools_chamadas > self.max_tools:
+            motivo = f"orçamento de tools estourado ({self.tools_chamadas} de {self.max_tools})"
+            self.eventos.append({"evento": "bloqueado", "agente": agent.name, "tool": tool.name, "motivo": motivo})
+            if self.verbose:
+                print(f"[governança] {agent.name} -> {tool.name}: BLOQUEADO ({motivo})")
+            raise LimiteExcedido(motivo)
+        if self.verbose:
+            print(f"[governança] {agent.name} -> {tool.name}: OK")
 
     async def on_llm_start(self, context, agent, system_prompt, input_items) -> None:
         self.chamadas_llm += 1
-        # 🆕 B.3 (opcional) -- acima de self.max_llm, levante LimiteExcedido.
-        #   (Parece o max_turns da Etapa 4.7, mas a mensagem e o registro são SEUS, e vale para a equipe toda.)
+        # 🆕 B.3 -- orçamento de chamadas ao modelo para a equipe toda.
+        if self.chamadas_llm > self.max_llm:
+            motivo = f"orçamento de chamadas ao modelo estourado ({self.chamadas_llm} de {self.max_llm})"
+            self.eventos.append({"evento": "bloqueado", "agente": agent.name, "tool": None, "motivo": motivo})
+            if self.verbose:
+                print(f"[governança] {agent.name}: BLOQUEADO ({motivo})")
+            raise LimiteExcedido(motivo)
 
     async def on_tool_end(self, context, agent, tool, result) -> None:
         # ETAPA 10.1 -- registra quem chamou qual tool, com quais argumentos e o que voltou (truncado).

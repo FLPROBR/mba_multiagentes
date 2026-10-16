@@ -338,3 +338,9 @@ Saída (`python etapa10_observabilidade.py C2_ferias_com_venda`):
 - O que mudar em produção: deixar o MCP Server rodando (transporte HTTP/SSE) com uma sessão reaproveitada em vez de subir um processo por chamada; cache dos feriados e do câmbio; não chamar LLM onde o Python resolve; modelo menor nos especialistas mais simples; trocar o JSONL por um trace de verdade (Langfuse/OpenTelemetry) com custo em R$.
 
 Observação: nesta versão o hook `Governanca` (on_tool_end/on_agent_end) registra em `self.eventos`; os tokens por nó vêm do `resultado.context_wrapper.usage` devolvido pelos nós ao `medido()`.
+
+## Opcionais
+
+- **🆕 A (votação):** `python etapa02_extracao.py --votacao`: C1 e C2 unânimes (3 votos iguais); C9: 3 votos iguais (ferias, datas None), sem divergência. Paralelo (C2) 2,8 s x sequência 8,3 s. No grafo (`USAR_VOTACAO = True`), o `extrair` do C2 foi de 1.141 para 3.547 tokens (~3,1x).
+- **🆕 B (governança):** `python etapa06_linear.py --governanca`: (a) `Coordenador -> consultar_remuneracao: BLOQUEADO`, a tool não executou; (b) com `max_tools=1`, `parecer_escala: BLOQUEADO (orçamento de tools estourado (2 de 1))`; (c) com limites normais, 7 tools `OK`.
+- **🆕 C (triagem humana):** nota do C10 = 0,50 (entre 0,4 e 0,8): pausa em `triagem_humana`. `sim` -> extrair; `nao` -> recusar. C1 não pausa; decisão do atendente na auditoria.

@@ -48,10 +48,13 @@ Rodar (a partir de aula10/):
     python etapa07_grafo.py --sem-guardrail C7_autoaprovacao   # ETAPA 9.5: o server ainda nega?
     python etapa07_grafo.py --mermaid                     # o diagrama
 """
+import asyncio
+import json
 import operator
 import os
 import re
 import sys
+from datetime import datetime
 from typing import Annotated, TypedDict
 
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -76,7 +79,7 @@ MODELO = configurar()
 MAX_TENTATIVAS = 3     # ciclo redigir <-> validar
 MAX_REJEICOES = 2      # ciclo chefia -> redigir
 USAR_VOTACAO = False          # 🆕 A (opcional): True usa os 3 extratores com votação (etapa02_extracao.py)
-USAR_TRIAGEM_HUMANA = False   # 🆕 C (opcional): True liga as duas faixas e o nó triagem_humana
+USAR_TRIAGEM_HUMANA = True    # 🆕 C (opcional): True liga as duas faixas e o nó triagem_humana
 LIMIAR_OK = 0.4        # 🆕 C: abaixo disto, segue direto
 LIMIAR_BLOQUEIO = 0.8  # 🆕 C: a partir disto, bloqueia; entre os dois, um humano decide
 GUARDRAIL_LIGADO = "--sem-guardrail" not in sys.argv  # ETAPA 9.5
@@ -90,6 +93,8 @@ class Estado(TypedDict, total=False):
     motivo_bloqueio: str
     nota_escopo: float
     triagem: dict                 # 🆕 C: {"segue": bool, "orientacao": str, "quem": str}
+    duvida: bool                  # 🆕 C: nota entre LIMIAR_OK e LIMIAR_BLOQUEIO
+    motivo_classificador: str     # 🆕 C: motivo da nota, mostrado ao atendente
     pedido: dict                  # Pedido.model_dump(mode="json")
     divergencia: bool             # 🆕 A
     servidor: dict
@@ -137,8 +142,18 @@ def proteger_entrada(estado: Estado) -> dict:
         sensivel = encontrar_dado_sensivel(estado["texto"])
         if sensivel:
             return {"bloqueado": True, "motivo_bloqueio": MENSAGENS[sensivel], "caminho": ["proteger_entrada"]}
-        nota, _ = nota_escopo(estado["texto"])
+        nota, motivo = nota_escopo(estado["texto"])
         tokens = guardrails.TOKENS_ULTIMA_CHAMADA
+        if USAR_TRIAGEM_HUMANA:  # 🆕 C.1: duas faixas em vez de um único limiar
+            print(f"[proteger_entrada] nota de escopo: {nota:.2f}")
+            if nota >= LIMIAR_BLOQUEIO:
+                return {"bloqueado": True, "motivo_bloqueio": MENSAGENS["fora_do_escopo"], "nota_escopo": nota,
+                        "tokens": tokens, "caminho": ["proteger_entrada"]}
+            if nota >= LIMIAR_OK:
+                return {"bloqueado": False, "duvida": True, "nota_escopo": nota, "motivo_classificador": motivo,
+                        "tokens": tokens, "caminho": ["proteger_entrada"]}
+            return {"bloqueado": False, "duvida": False, "nota_escopo": nota, "tokens": tokens,
+                    "caminho": ["proteger_entrada"]}
         if nota >= LIMIAR:
             return {"bloqueado": True, "motivo_bloqueio": MENSAGENS["fora_do_escopo"], "nota_escopo": nota,
                     "tokens": tokens, "caminho": ["proteger_entrada"]}
@@ -147,26 +162,50 @@ def proteger_entrada(estado: Estado) -> dict:
 
 
 def rotear_entrada(estado: Estado) -> str:
-    return "bloqueado" if estado.get("bloqueado") else "ok"
+    if estado.get("bloqueado"):
+        return "bloqueado"
+    return "duvida" if estado.get("duvida") else "ok"
+
+
+def _auditar_triagem(estado: Estado, segue: bool, quem: str, orientacao: str) -> None:
+    """🆕 C: a decisão do atendente também entra na auditoria da Etapa 9 (mesmo arquivo, mesmo formato)."""
+    linha = {"quando": datetime.now().isoformat(timespec="seconds"), "thread_id": estado.get("thread_id", ""),
+             "quem": quem, "tool": "triagem_humana", "protocolo": "", "decisao_acesso": "ALLOW" if segue else "DENY",
+             "motivo": orientacao or ("seguiu" if segue else "recusado pelo atendente"),
+             "parametros": {"nota": estado.get("nota_escopo")}}
+    SAIDAS.mkdir(exist_ok=True)
+    with (SAIDAS / "auditoria.jsonl").open("a", encoding="utf-8") as arquivo:
+        arquivo.write(json.dumps(linha, ensure_ascii=False) + "\n")
 
 
 def triagem_humana(estado: Estado) -> dict:
-    # 🆕 C.2 (opcional) -- resposta = interrupt({"pergunta": "Este texto deve seguir como pedido ao RH?",
-    #                                  "texto": ..., "nota": ..., "quem_decide": "atendente do RH"})
-    #   `resposta` é o que o retomar() entregar: {"segue": bool, "orientacao": str, "quem": str}.
-    #   Se segue, ANEXE a orientação ao texto (ex.: "[RH: tratar como abono]") para o extrator usar.
-    #   Lembre: na retomada este nó roda DE NOVO desde o início -- nada com efeito colateral antes do interrupt().
-    #   Conceito: aula7/exemplos/06_human_in_the_loop/main.py (lá o humano aprova a SAÍDA; aqui decide a ENTRADA)
-    raise NotImplementedError("🆕 C.2: triagem_humana")
+    # 🆕 C.2 -- o humano decide a ENTRADA. Nada com efeito colateral antes do interrupt(): na retomada o nó recomeça.
+    resposta = interrupt({
+        "pergunta": "Este texto deve seguir como pedido ao RH?",
+        "texto": estado["texto"],
+        "nota": estado.get("nota_escopo"),
+        "motivo_classificador": estado.get("motivo_classificador", ""),
+        "quem_decide": "atendente do RH",
+    })
+    segue, quem, orientacao = resposta["segue"], resposta.get("quem", "?"), resposta.get("orientacao", "")
+    _auditar_triagem(estado, segue, quem, orientacao)
+    triagem = {"segue": segue, "orientacao": orientacao, "quem": quem}
+    if segue:
+        texto = estado["texto"] + (f" [RH: {orientacao}]" if orientacao else "")
+        return {"triagem": triagem, "texto": texto, "caminho": ["triagem_humana"]}
+    return {"triagem": {**triagem, "orientacao": orientacao or MENSAGENS["fora_do_escopo"]},
+            "caminho": ["triagem_humana"]}
 
 
 def rotear_triagem(estado: Estado) -> str:
-    # 🆕 C.2 -- "segue" ou "recusa"
-    raise NotImplementedError("🆕 C.2: rotear_triagem")
+    return "segue" if estado["triagem"]["segue"] else "recusa"
 
 
 def no_extrair(estado: Estado) -> dict:
-    pedido, divergencia = extrair(estado["texto"]), False
+    if USAR_VOTACAO:  # 🆕 A: 3 extratores em paralelo, decisão por maioria
+        pedido, divergencia, _ = asyncio.run(extrair_com_votacao(estado["texto"]))
+    else:
+        pedido, divergencia = extrair(estado["texto"]), False
     return {"pedido": pedido.model_dump(mode="json"), "divergencia": divergencia,
             "tokens": extracao.TOKENS_ULTIMA_CHAMADA, "caminho": ["extrair"]}
 
@@ -363,7 +402,11 @@ def construir(checkpointer=None):
 
     construtor.add_edge(START, "receber")
     construtor.add_edge("receber", "proteger_entrada")
-    construtor.add_conditional_edges("proteger_entrada", rotear_entrada, {"bloqueado": "recusar", "ok": "extrair"})
+    rotas_entrada = {"bloqueado": "recusar", "ok": "extrair"}
+    if USAR_TRIAGEM_HUMANA:  # 🆕 C
+        rotas_entrada["duvida"] = "triagem_humana"
+        construtor.add_conditional_edges("triagem_humana", rotear_triagem, {"segue": "extrair", "recusa": "recusar"})
+    construtor.add_conditional_edges("proteger_entrada", rotear_entrada, rotas_entrada)
     construtor.add_conditional_edges("extrair", rotear_extracao, {"incompleto": "pedir_dados", "ok": "identificar_servidor"})
     construtor.add_conditional_edges("identificar_servidor", rotear_servidor,
                                      {"nao_encontrado": "pedir_dados", "ok": "calcular_periodo"})

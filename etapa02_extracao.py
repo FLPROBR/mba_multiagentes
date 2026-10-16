@@ -113,7 +113,16 @@ def extrair(texto: str) -> Pedido:
 # Para ligar no grafo depois de pronto: USAR_VOTACAO = True em etapa07_grafo.py.
 # 🆕 A.1 -- três instruções LIGEIRAMENTE diferentes para a MESMA tarefa (comece cada uma com f"Hoje é {texto_hoje()}. ")
 #   ex.: um extrator literal; um que confere as datas contra o calendário; um que "pensa como o RH".
-INSTRUCOES_VOTANTES: list[str] = []  # TODO 🆕 A.1: preencha com 3 strings
+INSTRUCOES_VOTANTES: list[str] = [
+    # 1. literal: só o que está escrito
+    INSTRUCOES_EXTRATOR + " Seja LITERAL: extraia apenas o que está escrito no texto, sem interpretar intenções.",
+    # 2. confere as datas contra o calendário
+    INSTRUCOES_EXTRATOR + " Confira cada data contra o calendário: o dia e o mês existem, a data final não é anterior "
+    "à inicial e o ano é o do texto (ou o próximo, se a data já passou). Na dúvida sobre uma data, use null.",
+    # 3. pensa como o RH
+    INSTRUCOES_EXTRATOR + " Pense como um analista de RH: identifique o tipo do pedido pela intenção do servidor "
+    "(descanso anual = férias; folga de um dia = abono; viagem a serviço = diária), mas nunca preencha o que não foi dito.",
+]
 
 
 async def extrair_com_votacao(texto: str) -> tuple[Pedido, bool, list[Pedido]]:
@@ -121,7 +130,14 @@ async def extrair_com_votacao(texto: str) -> tuple[Pedido, bool, list[Pedido]]:
     #     resultados = await asyncio.gather(*(Runner.run(e, texto) for e in extratores))
     #   depois chame votar([r.final_output for r in resultados]) e devolva (pedido_final, divergencia, votos).
     #   Conceito: aula7/exemplos/08_paralelismo/main.py (fan-out/fan-in), aqui em asyncio, sem grafo.
-    raise NotImplementedError("🆕 A.2: extrair_com_votacao")
+    global TOKENS_ULTIMA_CHAMADA
+    extratores = [criar_extrator(instrucoes) for instrucoes in INSTRUCOES_VOTANTES]
+    resultados = await asyncio.gather(*(Runner.run(e, texto) for e in extratores))  # os 3 AO MESMO TEMPO
+    votos = [r.final_output for r in resultados]
+    TOKENS_ULTIMA_CHAMADA = sum(getattr(getattr(r, "context_wrapper", None), "usage", None).total_tokens
+                                 if hasattr(r, "context_wrapper") else 0 for r in resultados)
+    pedido, divergencia = votar(votos)
+    return pedido, divergencia, votos
 
 
 def votar(votos: list[Pedido]) -> tuple[Pedido, bool]:
