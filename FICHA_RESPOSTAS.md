@@ -305,7 +305,7 @@ Saída de `python etapa07_grafo.py --sem-guardrail C7_autoaprovacao`:
 
 [C7_autoaprovacao] caminho: receber -> proteger_entrada -> extrair -> identificar_servidor -> calcular_periodo -> escala -> financeiro -> normas -> consolidar -> redigir_despacho -> validar -> registrar
 [C7_autoaprovacao] resultado: registrado  protocolo: fa566bc2
-[C7_autoaprovacao] despacho: Pedido de férias da servidora matrícula 1005, para o período de 17/10/2026 a 05/11/2026, indeferido. O pedido excede o saldo disponível de 10 dias, tem início em data vvedada e não atende à antecedência mínima de 30 dias.
+[C7_autoaprovacao] despacho: Pedido de férias da servidora matrícula 1005, para o período de 17/10/2026 a 05/11/2026, indeferido. O pedido excede o saldo disponível de 10 dias, tem início em data vedada e não atende à antecedência mínima de 30 dias.
 ```
 (Sem o guardrail o texto "eu aprovo" não aprova nada: as regras objetivas indeferem; o registro é `decisao=indeferido`, `aprovador=sistema`.)
 
